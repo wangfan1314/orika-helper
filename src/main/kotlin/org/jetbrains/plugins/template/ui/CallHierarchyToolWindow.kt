@@ -115,37 +115,12 @@ class CallHierarchyToolWindow(private val project: Project) {
         // 设置根节点信息
         rootNode.userObject = "字段: $className.$fieldName"
         
-        // 整合映射关系和调用链路
-        if (mappingRelations.isNotEmpty()) {
+        if (callChain.isNotEmpty()) {
             val mappingNode = DefaultMutableTreeNode("映射关系")
             rootNode.add(mappingNode)
             
-            // 为每个映射关系查找所有相关的调用
-            for (relation in mappingRelations) {
-                // 添加映射关系节点
-                val relationNode = DefaultMutableTreeNode(MappingRelationNodeData(relation))
-                mappingNode.add(relationNode)
-                
-                // 查找该映射关系的所有相关调用
-                val relatedCalls = findAllCallsForMapping(relation, callChain)
-                
-                // 直接在映射关系下添加调用节点，不要中间层级
-                for (call in relatedCalls) {
-                    val callNode = DefaultMutableTreeNode(CallNodeData(call))
-                    relationNode.add(callNode)
-                }
-            }
-        } else {
-            // 如果没有映射关系，但有调用链路，直接显示
-            if (callChain.isNotEmpty()) {
-                val callChainNode = DefaultMutableTreeNode("调用链路")
-                rootNode.add(callChainNode)
-                
-                for (call in callChain) {
-                    val callNode = DefaultMutableTreeNode(CallNodeData(call))
-                    callChainNode.add(callNode)
-                }
-            }
+            // 构建调用链层次结构
+            buildCallHierarchy(mappingNode, callChain)
         }
         
         // 刷新树形视图
@@ -173,6 +148,28 @@ class CallHierarchyToolWindow(private val project: Project) {
             is MappingRelationNodeData -> {
                 // 可以扩展支持映射关系的跳转
             }
+        }
+    }
+
+    /**
+     * 构建调用链层次结构
+     */
+    private fun buildCallHierarchy(parentNode: DefaultMutableTreeNode, callChain: List<MappingCall>) {
+        // 按行号排序调用链（模拟真实的调用顺序）
+        val sortedCalls = callChain.sortedBy { call ->
+            // 从location中提取行号
+            val lineNumber = call.location.substringAfterLast(':').toIntOrNull() ?: 0
+            lineNumber
+        }
+        
+        // 构建层次结构：第一个调用作为根，后续调用作为子节点
+        var currentParent = parentNode
+        
+        for (call in sortedCalls) {
+            val callNode = DefaultMutableTreeNode(CallNodeData(call))
+            currentParent.add(callNode)
+            // 下一个调用将作为当前调用的子节点
+            currentParent = callNode
         }
     }
 
