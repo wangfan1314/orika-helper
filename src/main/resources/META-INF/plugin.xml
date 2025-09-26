@@ -1,15 +1,30 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>org.jetbrains.plugins.template</id>
-    <name>IntelliJ Platform Plugin Template</name>
+    <name>Orika Mapping Tracer</name>
     <vendor>JetBrains</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>com.intellij.java</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow factoryClass="org.jetbrains.plugins.template.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="org.jetbrains.plugins.template.ui.CallHierarchyToolWindowFactory" 
+                    id="Orika映射调用链" 
+                    anchor="bottom" 
+                    secondary="true"/>
         <postStartupActivity implementation="org.jetbrains.plugins.template.startup.MyProjectActivity" />
     </extensions>
+
+    <actions>
+        <action id="OrikaMappingTracer.ShowCallHierarchy" 
+                class="org.jetbrains.plugins.template.actions.OrikaMappingTracerAction"
+                text="显示Orika映射调用链"
+                description="显示选中字段的Orika映射调用链路">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift O"/>
+        </action>
+    </actions>
 </idea-plugin>
