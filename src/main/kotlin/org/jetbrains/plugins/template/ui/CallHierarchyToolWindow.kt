@@ -152,25 +152,123 @@ class CallHierarchyToolWindow(private val project: Project) {
     }
 
     /**
-     * 构建调用链层次结构
+     * 构建调用链层次结构（智能识别数据流转链路）
      */
     private fun buildCallHierarchy(parentNode: DefaultMutableTreeNode, callChain: List<MappingCall>) {
-        // 按行号排序调用链（模拟真实的调用顺序）
+        // 按行号排序调用链
         val sortedCalls = callChain.sortedBy { call ->
-            // 从location中提取行号
             val lineNumber = call.location.substringAfterLast(':').toIntOrNull() ?: 0
             lineNumber
         }
         
-        // 构建层次结构：第一个调用作为根，后续调用作为子节点
-        var currentParent = parentNode
+        // 尝试识别数据流转链路
+        val mappingChains = identifyMappingChains(sortedCalls)
         
-        for (call in sortedCalls) {
-            val callNode = DefaultMutableTreeNode(CallNodeData(call))
-            currentParent.add(callNode)
-            // 下一个调用将作为当前调用的子节点
-            currentParent = callNode
+        if (mappingChains.isNotEmpty()) {
+            // 如果识别出了映射链路，按链路显示
+            for ((chainIndex, chain) in mappingChains.withIndex()) {
+                if (chain.size == 1) {
+                    // 单个调用直接添加
+                    val callNode = DefaultMutableTreeNode(CallNodeData(chain.first()))
+                    parentNode.add(callNode)
+                } else {
+                    // 多个调用形成链路
+                    val chainNode = DefaultMutableTreeNode("映射链路 ${chainIndex + 1}")
+                    parentNode.add(chainNode)
+                    
+                    // 构建链式层次结构
+                    var currentParent = chainNode
+                    for (call in chain) {
+                        val callNode = DefaultMutableTreeNode(CallNodeData(call))
+                        currentParent.add(callNode)
+                        currentParent = callNode
+                    }
+                }
+            }
+        } else {
+            // 如果没有识别出链路，按方法分组显示
+            val callsByMethod = sortedCalls.groupBy { call ->
+                "${call.className}.${call.methodName}"
+            }
+            
+            for ((methodSignature, methodCalls) in callsByMethod) {
+                if (methodCalls.size == 1) {
+                    val callNode = DefaultMutableTreeNode(CallNodeData(methodCalls.first()))
+                    parentNode.add(callNode)
+                } else {
+                    val methodNode = DefaultMutableTreeNode("方法: $methodSignature")
+                    parentNode.add(methodNode)
+                    
+                    for (call in methodCalls) {
+                        val callNode = DefaultMutableTreeNode(CallNodeData(call))
+                        methodNode.add(callNode)
+                    }
+                }
+            }
         }
+    }
+    
+    /**
+     * 识别映射链路（基于类型流转分析）
+     */
+    private fun identifyMappingChains(calls: List<MappingCall>): List<List<MappingCall>> {
+        val chains = mutableListOf<List<MappingCall>>()
+        val processedCalls = mutableSetOf<MappingCall>()
+        
+        for (call in calls) {
+            if (call in processedCalls) continue
+            
+            val chain = mutableListOf<MappingCall>()
+            chain.add(call)
+            processedCalls.add(call)
+            
+            // 查找可能的链式调用
+            val callTypes = extractTypesFromCall(call)
+            if (callTypes != null) {
+                val (sourceType, targetType) = callTypes
+                
+                // 查找以targetType为源类型的后续调用
+                var currentTargetType = targetType
+                for (nextCall in calls) {
+                    if (nextCall in processedCalls) continue
+                    
+                    val nextCallTypes = extractTypesFromCall(nextCall)
+                    if (nextCallTypes != null && nextCallTypes.first == currentTargetType) {
+                        chain.add(nextCall)
+                        processedCalls.add(nextCall)
+                        currentTargetType = nextCallTypes.second
+                        break // 只找直接的下一个调用
+                    }
+                }
+            }
+            
+            chains.add(chain)
+        }
+        
+        return chains
+    }
+    
+    /**
+     * 从映射调用中提取源类型和目标类型
+     */
+    private fun extractTypesFromCall(call: MappingCall): Pair<String, String>? {
+        val psiElement = call.psiElement
+        if (psiElement is PsiMethodCallExpression) {
+            try {
+                val args = psiElement.argumentList.expressions
+                if (args.size >= 2) {
+                    val sourceType = extractTypeFromCall(args[0])
+                    val targetType = extractTypeFromCall(args[1])
+                    
+                    if (sourceType != null && targetType != null) {
+                        return Pair(sourceType, targetType)
+                    }
+                }
+            } catch (e: Exception) {
+                // 忽略异常
+            }
+        }
+        return null
     }
 
     /**

@@ -37,7 +37,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
     }
 
     /**
-     * 递归查找所有相关的映射关系
+     * 递归查找所有相关的映射关系（严格的字段级别验证版本）
      */
     private fun findAllRelatedMappings(
         field: PsiField, 
@@ -53,24 +53,32 @@ class OrikaMappingAnalyzer(private val project: Project) {
         }
         processedClasses.add(fieldClass)
         
-        // 1. 查找直接映射关系
+        // 首先验证当前字段在当前类中确实存在
+        val currentField = findFieldInClass(fieldClass, fieldName)
+        if (currentField == null) {
+            return // 如果当前类中不存在该字段，则不进行任何映射查找
+        }
+        
+        // 1. 查找直接映射关系（已修改为字段级别验证）
         val directMappings = findActualMappingCalls(field)
         relations.addAll(directMappings)
         
-        // 2. 查找该类作为源类型的所有映射
+        // 2. 查找该类作为源类型的所有映射（已修改为字段级别验证）
         val outgoingMappings = findMappingsFromClass(fieldClass, fieldName)
         relations.addAll(outgoingMappings)
         
-        // 3. 查找该类作为目标类型的所有映射
+        // 3. 查找该类作为目标类型的所有映射（已修改为字段级别验证）
         val incomingMappings = findMappingsToClass(fieldClass, fieldName)
         relations.addAll(incomingMappings)
         
-        // 4. 查找项目中所有涉及当前类的映射调用
+        // 4. 查找项目中所有涉及当前类的映射调用（已修改为字段级别验证）
         val allClassMappings = findAllMappingRelationsForClass(fieldClass, fieldName)
         relations.addAll(allClassMappings)
         
-        // 5. 递归处理相关的类
+        // 5. 递归处理相关的类 - 只有在存在有效映射关系时才继续递归
         val relatedClasses = mutableSetOf<String>()
+        
+        // 只从有效的映射关系中提取相关类
         directMappings.forEach { mapping ->
             relatedClasses.add(mapping.sourceClass)
             relatedClasses.add(mapping.targetClass)
@@ -86,11 +94,12 @@ class OrikaMappingAnalyzer(private val project: Project) {
             relatedClasses.add(mapping.targetClass)
         }
         
-        // 递归处理相关类中的同名字段
+        // 递归处理相关类中的同名字段 - 严格验证字段存在性
         for (relatedClass in relatedClasses) {
             if (!processedClasses.contains(relatedClass) && relatedClass != fieldClass) {
                 val relatedField = findFieldInClass(relatedClass, fieldName)
                 if (relatedField != null) {
+                    // 只有当相关类中确实存在同名字段时才继续递归
                     findAllRelatedMappings(relatedField, relations, processedClasses)
                 }
             }
@@ -115,7 +124,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
     }
 
     /**
-     * 递归查找所有相关的映射调用
+     * 递归查找所有相关的映射调用（严格的字段级别验证版本）
      */
     private fun findAllRelatedMappingCalls(
         field: PsiField, 
@@ -123,6 +132,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
         processedClasses: MutableSet<String>
     ) {
         val fieldClass = field.containingClass?.qualifiedName ?: return
+        val fieldName = field.name
         
         // 避免循环处理
         if (processedClasses.contains(fieldClass)) {
@@ -130,34 +140,51 @@ class OrikaMappingAnalyzer(private val project: Project) {
         }
         processedClasses.add(fieldClass)
         
-        // 1. 查找直接的Orika映射调用
-        val directCalls = findOrikaMappingCalls(field)
+        // 首先验证当前字段在当前类中确实存在
+        val currentField = findFieldInClass(fieldClass, fieldName)
+        if (currentField == null) {
+            return // 如果当前类中不存在该字段，则不进行任何映射调用查找
+        }
+        
+        // 1. 查找直接的Orika映射调用（需要进一步验证字段级别的相关性）
+        val directCalls = findOrikaMappingCallsWithFieldValidation(field)
         callChain.addAll(directCalls)
         
-        // 2. 查找涉及该类的所有映射调用
-        val allClassMappings = findAllMappingCallsForClass(fieldClass)
+        // 2. 查找涉及该类的所有映射调用（需要进一步验证字段级别的相关性）
+        val allClassMappings = findAllMappingCallsForClassWithFieldValidation(fieldClass, fieldName)
         callChain.addAll(allClassMappings)
         
-        // 3. 递归处理相关的类
+        // 3. 递归处理相关的类 - 只有在存在有效的字段级别映射时才继续
         val relatedClasses = mutableSetOf<String>()
+        
+        // 从有效的映射调用中提取相关类，并验证字段存在性
         allClassMappings.forEach { call ->
-            // 从映射调用中提取相关类
             val methodCall = call.psiElement
             if (methodCall is PsiMethodCallExpression) {
                 val args = methodCall.argumentList.expressions
                 if (args.size >= 2) {
                     val sourceType = getTypeFromExpression(args[0])
                     val targetType = getTypeFromExpression(args[1])
-                    sourceType?.let { relatedClasses.add(it) }
-                    targetType?.let { relatedClasses.add(it) }
+                    
+                    // 只有当相关类中也存在该字段时才添加到递归列表
+                    sourceType?.let { 
+                        if (findFieldInClass(it, fieldName) != null) {
+                            relatedClasses.add(it)
+                        }
+                    }
+                    targetType?.let { 
+                        if (findFieldInClass(it, fieldName) != null) {
+                            relatedClasses.add(it)
+                        }
+                    }
                 }
             }
         }
         
-        // 递归处理相关类中的同名字段
+        // 递归处理相关类中的同名字段 - 严格验证字段存在性
         for (relatedClass in relatedClasses) {
             if (!processedClasses.contains(relatedClass)) {
-                val relatedField = findFieldInClass(relatedClass, field.name)
+                val relatedField = findFieldInClass(relatedClass, fieldName)
                 if (relatedField != null) {
                     findAllRelatedMappingCalls(relatedField, callChain, processedClasses)
                 }
@@ -170,6 +197,12 @@ class OrikaMappingAnalyzer(private val project: Project) {
      */
     private fun findMappingsFromClass(sourceClass: String, fieldName: String): List<MappingRelation> {
         val relations = mutableListOf<MappingRelation>()
+        
+        // 首先验证源类中是否真实存在该字段
+        val sourceField = findFieldInClass(sourceClass, fieldName)
+        if (sourceField == null) {
+            return relations // 如果源类中不存在该字段，则不进行映射查找
+        }
         
         // 搜索项目中的所有Java文件
         val javaFiles = mutableListOf<PsiJavaFile>()
@@ -198,14 +231,17 @@ class OrikaMappingAnalyzer(private val project: Project) {
                             val targetType = getTypeFromExpression(args[1])
                             
                             if (sourceType == sourceClass && targetType != null) {
-                                val targetField = findCorrespondingField(targetType, fieldName)
-                                relations.add(MappingRelation(
-                                    sourceClass = sourceClass,
-                                    sourceField = fieldName,
-                                    targetClass = targetType,
-                                    targetField = targetField ?: fieldName,
-                                    mappingType = "ORIKA_MAP_CALL"
-                                ))
+                                // 验证目标类中也存在该字段
+                                val targetField = findFieldInClass(targetType, fieldName)
+                                if (targetField != null) {
+                                    relations.add(MappingRelation(
+                                        sourceClass = sourceClass,
+                                        sourceField = fieldName,
+                                        targetClass = targetType,
+                                        targetField = fieldName,
+                                        mappingType = "ORIKA_MAP_CALL"
+                                    ))
+                                }
                             }
                         }
                     }
@@ -221,6 +257,12 @@ class OrikaMappingAnalyzer(private val project: Project) {
      */
     private fun findMappingsToClass(targetClass: String, fieldName: String): List<MappingRelation> {
         val relations = mutableListOf<MappingRelation>()
+        
+        // 首先验证目标类中是否真实存在该字段
+        val targetField = findFieldInClass(targetClass, fieldName)
+        if (targetField == null) {
+            return relations // 如果目标类中不存在该字段，则不进行映射查找
+        }
         
         // 搜索项目中的所有Java文件
         val javaFiles = mutableListOf<PsiJavaFile>()
@@ -249,14 +291,17 @@ class OrikaMappingAnalyzer(private val project: Project) {
                             val targetType = getTypeFromExpression(args[1])
                             
                             if (targetType == targetClass && sourceType != null) {
-                                val sourceField = findCorrespondingField(sourceType, fieldName)
-                                relations.add(MappingRelation(
-                                    sourceClass = sourceType,
-                                    sourceField = sourceField ?: fieldName,
-                                    targetClass = targetClass,
-                                    targetField = fieldName,
-                                    mappingType = "ORIKA_MAP_CALL"
-                                ))
+                                // 验证源类中也存在该字段
+                                val sourceField = findFieldInClass(sourceType, fieldName)
+                                if (sourceField != null) {
+                                    relations.add(MappingRelation(
+                                        sourceClass = sourceType,
+                                        sourceField = fieldName,
+                                        targetClass = targetClass,
+                                        targetField = fieldName,
+                                        mappingType = "ORIKA_MAP_CALL"
+                                    ))
+                                }
                             }
                         }
                     }
@@ -272,6 +317,12 @@ class OrikaMappingAnalyzer(private val project: Project) {
      */
     private fun findAllMappingRelationsForClass(className: String, fieldName: String): List<MappingRelation> {
         val relations = mutableListOf<MappingRelation>()
+        
+        // 首先验证当前类中是否真实存在该字段
+        val currentField = findFieldInClass(className, fieldName)
+        if (currentField == null) {
+            return relations // 如果当前类中不存在该字段，则不进行映射查找
+        }
         
         // 搜索项目中的所有Java文件
         val javaFiles = mutableListOf<PsiJavaFile>()
@@ -299,27 +350,33 @@ class OrikaMappingAnalyzer(private val project: Project) {
                             val sourceType = getTypeFromExpression(args[0])
                             val targetType = getTypeFromExpression(args[1])
                             
-                            // 检查是否涉及当前类
+                            // 检查是否涉及当前类，并验证双方都存在该字段
                             when {
                                 sourceType == className && targetType != null -> {
-                                    val targetField = findCorrespondingField(targetType, fieldName)
-                                    relations.add(MappingRelation(
-                                        sourceClass = className,
-                                        sourceField = fieldName,
-                                        targetClass = targetType,
-                                        targetField = targetField ?: fieldName,
-                                        mappingType = "ORIKA_MAP_CALL"
-                                    ))
+                                    // 验证目标类中也存在该字段
+                                    val targetField = findFieldInClass(targetType, fieldName)
+                                    if (targetField != null) {
+                                        relations.add(MappingRelation(
+                                            sourceClass = className,
+                                            sourceField = fieldName,
+                                            targetClass = targetType,
+                                            targetField = fieldName,
+                                            mappingType = "ORIKA_MAP_CALL"
+                                        ))
+                                    }
                                 }
                                 targetType == className && sourceType != null -> {
-                                    val sourceField = findCorrespondingField(sourceType, fieldName)
-                                    relations.add(MappingRelation(
-                                        sourceClass = sourceType,
-                                        sourceField = sourceField ?: fieldName,
-                                        targetClass = className,
-                                        targetField = fieldName,
-                                        mappingType = "ORIKA_MAP_CALL"
-                                    ))
+                                    // 验证源类中也存在该字段
+                                    val sourceField = findFieldInClass(sourceType, fieldName)
+                                    if (sourceField != null) {
+                                        relations.add(MappingRelation(
+                                            sourceClass = sourceType,
+                                            sourceField = fieldName,
+                                            targetClass = className,
+                                            targetField = fieldName,
+                                            mappingType = "ORIKA_MAP_CALL"
+                                        ))
+                                    }
                                 }
                             }
                         }
@@ -385,18 +442,33 @@ class OrikaMappingAnalyzer(private val project: Project) {
                             val sourceType = getTypeFromExpression(args[0])
                             val targetType = getTypeFromExpression(args[1])
                             
-                            if (sourceType == sourceClass || targetType == sourceClass) {
-                                // 找到包含目标字段的映射
-                                val targetClassName = if (sourceType == sourceClass) targetType else sourceType
-                                val targetField = findCorrespondingField(targetClassName, fieldName)
-                                
-                                relations.add(MappingRelation(
-                                    sourceClass = sourceClass,
-                                    sourceField = fieldName,
-                                    targetClass = targetClassName ?: "Unknown",
-                                    targetField = targetField ?: fieldName,
-                                    mappingType = "ORIKA_MAP_CALL"
-                                ))
+                            when {
+                                sourceType == sourceClass && targetType != null -> {
+                                    // 验证目标类中是否存在该字段
+                                    val targetField = findFieldInClass(targetType, fieldName)
+                                    if (targetField != null) {
+                                        relations.add(MappingRelation(
+                                            sourceClass = sourceClass,
+                                            sourceField = fieldName,
+                                            targetClass = targetType,
+                                            targetField = fieldName,
+                                            mappingType = "ORIKA_MAP_CALL"
+                                        ))
+                                    }
+                                }
+                                targetType == sourceClass && sourceType != null -> {
+                                    // 验证源类中是否存在该字段
+                                    val sourceField = findFieldInClass(sourceType, fieldName)
+                                    if (sourceField != null) {
+                                        relations.add(MappingRelation(
+                                            sourceClass = sourceType,
+                                            sourceField = fieldName,
+                                            targetClass = sourceClass,
+                                            targetField = fieldName,
+                                            mappingType = "ORIKA_MAP_CALL"
+                                        ))
+                                    }
+                                }
                             }
                         }
                     }
@@ -461,7 +533,141 @@ class OrikaMappingAnalyzer(private val project: Project) {
     }
 
     /**
-     * 查找Orika映射调用
+     * 查找Orika映射调用（带字段级别验证）
+     */
+    private fun findOrikaMappingCallsWithFieldValidation(field: PsiField): List<MappingCall> {
+        val calls = mutableListOf<MappingCall>()
+        val fieldClass = field.containingClass?.qualifiedName ?: return calls
+        val fieldName = field.name
+        
+        // 搜索包含map方法调用的地方
+        val javaFiles = mutableListOf<PsiJavaFile>()
+        FileTypeIndex.processFiles(
+            JavaFileType.INSTANCE,
+            { virtualFile ->
+                val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
+                if (psiFile is PsiJavaFile) {
+                    javaFiles.add(psiFile)
+                }
+                true
+            },
+            GlobalSearchScope.projectScope(project)
+        )
+        
+        for (javaFile in javaFiles) {
+            javaFile.accept(object : JavaRecursiveElementVisitor() {
+                override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
+                    super.visitMethodCallExpression(expression)
+                    
+                    val methodName = expression.methodExpression.referenceName
+                    if (methodName == "map") {
+                        val args = expression.argumentList.expressions
+                        if (args.size >= 2) {
+                            val sourceType = getTypeFromExpression(args[0])
+                            val targetType = getTypeFromExpression(args[1])
+                            
+                            // 验证字段级别的相关性
+                            var isFieldRelevant = false
+                            when {
+                                sourceType == fieldClass && targetType != null -> {
+                                    // 验证目标类中也存在该字段
+                                    isFieldRelevant = findFieldInClass(targetType, fieldName) != null
+                                }
+                                targetType == fieldClass && sourceType != null -> {
+                                    // 验证源类中也存在该字段
+                                    isFieldRelevant = findFieldInClass(sourceType, fieldName) != null
+                                }
+                            }
+                            
+                            if (isFieldRelevant) {
+                                val containingMethod = PsiTreeUtil.getParentOfType(expression, PsiMethod::class.java)
+                                if (containingMethod != null) {
+                                    calls.add(MappingCall(
+                                        methodName = containingMethod.name,
+                                        className = containingMethod.containingClass?.qualifiedName ?: "Unknown",
+                                        location = "${containingMethod.containingFile?.name}:${getLineNumber(expression)}",
+                                        callType = "ORIKA_MAPPING",
+                                        psiElement = expression
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        }
+        
+        return calls
+    }
+
+    /**
+     * 查找涉及指定类的所有映射调用（带字段级别验证）
+     */
+    private fun findAllMappingCallsForClassWithFieldValidation(className: String, fieldName: String): List<MappingCall> {
+        val calls = mutableListOf<MappingCall>()
+        
+        // 搜索包含map方法调用的地方
+        val javaFiles = mutableListOf<PsiJavaFile>()
+        FileTypeIndex.processFiles(
+            JavaFileType.INSTANCE,
+            { virtualFile ->
+                val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
+                if (psiFile is PsiJavaFile) {
+                    javaFiles.add(psiFile)
+                }
+                true
+            },
+            GlobalSearchScope.projectScope(project)
+        )
+        
+        for (javaFile in javaFiles) {
+            javaFile.accept(object : JavaRecursiveElementVisitor() {
+                override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
+                    super.visitMethodCallExpression(expression)
+                    
+                    val methodName = expression.methodExpression.referenceName
+                    if (methodName == "map") {
+                        val args = expression.argumentList.expressions
+                        if (args.size >= 2) {
+                            val sourceType = getTypeFromExpression(args[0])
+                            val targetType = getTypeFromExpression(args[1])
+                            
+                            // 验证字段级别的相关性
+                            var isFieldRelevant = false
+                            when {
+                                sourceType == className && targetType != null -> {
+                                    // 验证目标类中也存在该字段
+                                    isFieldRelevant = findFieldInClass(targetType, fieldName) != null
+                                }
+                                targetType == className && sourceType != null -> {
+                                    // 验证源类中也存在该字段
+                                    isFieldRelevant = findFieldInClass(sourceType, fieldName) != null
+                                }
+                            }
+                            
+                            if (isFieldRelevant) {
+                                val containingMethod = PsiTreeUtil.getParentOfType(expression, PsiMethod::class.java)
+                                if (containingMethod != null) {
+                                    calls.add(MappingCall(
+                                        methodName = containingMethod.name,
+                                        className = containingMethod.containingClass?.qualifiedName ?: "Unknown",
+                                        location = "${containingMethod.containingFile?.name}:${getLineNumber(expression)}",
+                                        callType = "ORIKA_MAPPING",
+                                        psiElement = expression
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        }
+        
+        return calls
+    }
+
+    /**
+     * 查找Orika映射调用（原版本，保留用于兼容）
      */
     private fun findOrikaMappingCalls(field: PsiField): List<MappingCall> {
         val calls = mutableListOf<MappingCall>()
@@ -549,7 +755,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
     }
 
     /**
-     * 查找对应的字段
+     * 查找对应的字段（严格匹配版本）
      */
     private fun findCorrespondingField(className: String?, fieldName: String): String? {
         if (className == null) return null
@@ -557,26 +763,17 @@ class OrikaMappingAnalyzer(private val project: Project) {
         try {
             val classes = JavaPsiFacade.getInstance(project).findClasses(className, GlobalSearchScope.projectScope(project))
             for (clazz in classes) {
-                // 首先查找同名字段
+                // 只查找同名字段，不再使用模糊匹配
                 val field = clazz.findFieldByName(fieldName, true)
                 if (field != null) {
                     return fieldName
-                }
-                
-                // 查找可能的映射字段（基于命名约定）
-                val allFields = clazz.allFields
-                for (f in allFields) {
-                    if (f.name.contains(fieldName, ignoreCase = true) || 
-                        fieldName.contains(f.name, ignoreCase = true)) {
-                        return f.name
-                    }
                 }
             }
         } catch (e: Exception) {
             // 忽略异常
         }
         
-        return fieldName
+        return null // 如果找不到精确匹配的字段，返回null
     }
 
     /**

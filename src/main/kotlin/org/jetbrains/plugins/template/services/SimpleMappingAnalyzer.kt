@@ -17,7 +17,7 @@ import org.jetbrains.plugins.template.model.MappingCall
 class SimpleMappingAnalyzer(private val project: Project) {
 
     /**
-     * 查找所有相关的映射关系（简化版）
+     * 查找所有相关的映射关系（简化版，增加字段级别验证）
      */
     fun findAllMappings(selectedField: PsiField): List<MappingRelation> {
         val relations = mutableListOf<MappingRelation>()
@@ -26,17 +26,18 @@ class SimpleMappingAnalyzer(private val project: Project) {
         // 获取项目中所有的map调用
         val allMapCalls = findAllMapCalls()
         
-        // 分析每个map调用，看是否涉及包含指定字段的类
+        // 分析每个map调用，只有当源类和目标类都存在该字段时才建立映射关系
         for (mapCall in allMapCalls) {
             val sourceClass = mapCall.sourceType
             val targetClass = mapCall.targetType
             
             if (sourceClass != null && targetClass != null) {
-                // 检查源类是否有指定字段
+                // 检查源类和目标类是否都存在指定字段
                 val sourceField = findFieldInClass(sourceClass, fieldName)
                 val targetField = findFieldInClass(targetClass, fieldName)
                 
-                if (sourceField != null || targetField != null) {
+                // 只有当源类和目标类都存在该字段时才建立映射关系
+                if (sourceField != null && targetField != null) {
                     relations.add(MappingRelation(
                         sourceClass = sourceClass,
                         sourceField = fieldName,
@@ -52,7 +53,7 @@ class SimpleMappingAnalyzer(private val project: Project) {
     }
 
     /**
-     * 查找所有相关的映射调用
+     * 查找所有相关的映射调用（增加字段级别验证）
      */
     fun findAllMappingCalls(selectedField: PsiField): List<MappingCall> {
         val calls = mutableListOf<MappingCall>()
@@ -61,17 +62,18 @@ class SimpleMappingAnalyzer(private val project: Project) {
         // 获取项目中所有的map调用
         val allMapCalls = findAllMapCalls()
         
-        // 分析每个map调用，看是否涉及包含指定字段的类
+        // 分析每个map调用，只有当源类和目标类都存在该字段时才认为相关
         for (mapCall in allMapCalls) {
             val sourceClass = mapCall.sourceType
             val targetClass = mapCall.targetType
             
             if (sourceClass != null && targetClass != null) {
-                // 检查是否涉及包含指定字段的类
+                // 检查源类和目标类是否都存在指定字段
                 val sourceField = findFieldInClass(sourceClass, fieldName)
                 val targetField = findFieldInClass(targetClass, fieldName)
                 
-                if (sourceField != null || targetField != null) {
+                // 只有当源类和目标类都存在该字段时才认为相关
+                if (sourceField != null && targetField != null) {
                     val containingMethod = PsiTreeUtil.getParentOfType(mapCall.psiCall, PsiMethod::class.java)
                     if (containingMethod != null) {
                         calls.add(MappingCall(
