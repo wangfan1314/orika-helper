@@ -217,7 +217,7 @@ class CallHierarchyTreeWindow(private val project: Project) {
                             }
                             CallHierarchyNodeType.ORIKA_MAPPING -> {
                                 icon = AllIcons.Nodes.Related
-                                text = "Orika映射: ${nodeData.hierarchyNode.getFullDisplayName()}"
+                                text = nodeData.hierarchyNode.displayName
                             }
                             CallHierarchyNodeType.METHOD_CALL -> {
                                 icon = AllIcons.Nodes.Method
@@ -229,6 +229,18 @@ class CallHierarchyTreeWindow(private val project: Project) {
                             }
                             CallHierarchyNodeType.ROOT -> {
                                 icon = AllIcons.Nodes.Field
+                                text = nodeData.hierarchyNode.displayName
+                            }
+                            CallHierarchyNodeType.GETTER_METHOD -> {
+                                icon = AllIcons.Nodes.Property
+                                text = "📍 ${nodeData.hierarchyNode.getFullDisplayName()}"
+                            }
+                            CallHierarchyNodeType.SETTER_METHOD -> {
+                                icon = AllIcons.Nodes.Property
+                                text = "📍 ${nodeData.hierarchyNode.getFullDisplayName()}"
+                            }
+                            CallHierarchyNodeType.ORIKA_METHOD -> {
+                                icon = AllIcons.Nodes.Related
                                 text = nodeData.hierarchyNode.displayName
                             }
                         }

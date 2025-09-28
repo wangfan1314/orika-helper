@@ -93,5 +93,20 @@ enum class CallHierarchyNodeType {
     /**
      * 根节点
      */
-    ROOT
+    ROOT,
+    
+    /**
+     * Getter方法调用
+     */
+    GETTER_METHOD,
+    
+    /**
+     * Setter方法调用
+     */
+    SETTER_METHOD,
+    
+    /**
+     * 包含Orika映射的方法调用
+     */
+    ORIKA_METHOD
 }

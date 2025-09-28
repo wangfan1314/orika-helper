@@ -30,30 +30,36 @@ class CallHierarchyAnalyzer(private val project: Project) {
      */
     fun analyzeCallHierarchy(field: PsiField): CallHierarchyNode? {
         try {
-            // 创建根节点
+            // 创建根节点（字段节点）
             val rootNode = CallHierarchyNode(
                 className = field.containingClass?.qualifiedName ?: "Unknown",
                 methodName = field.name,
-                displayName = "字段: ${field.containingClass?.name}.${field.name}",
+                displayName = "📍 字段: ${field.containingClass?.name}.${field.name}",
                 location = getElementLocation(field),
                 nodeType = CallHierarchyNodeType.ROOT,
                 psiElement = field
             )
             
-            // 查找包含该字段的方法
+            // 1. 直接查找涉及该字段的Orika映射
+            analyzeDirectOrikaRelationsForField(field, rootNode)
+            
+            // 2. 查找字段的getter/setter方法并追踪调用链路
+            analyzeFieldGetterSetterMethods(field, rootNode)
+            
+            // 3. 查找包含该字段的其他方法（保留原有功能）
             val containingMethods = findMethodsUsingField(field)
             
             for (method in containingMethods) {
-                val methodNode = createMethodNode(method)
-                if (methodNode != null) {
-                    rootNode.addChild(methodNode)
-                    // 使用增强的调用链路分析
-                    analyzeMethodCallHierarchyWithOrikaSupport(field, method, methodNode, mutableSetOf(), 0, 10)
+                // 跳过getter/setter方法，避免重复
+                if (!isGetterSetterMethod(method, field.name)) {
+                    val methodNode = createMethodNode(method)
+                    if (methodNode != null) {
+                        rootNode.addChild(methodNode)
+                        // 使用增强的调用链路分析
+                        analyzeMethodCallHierarchyWithOrikaSupport(field, method, methodNode, mutableSetOf(), 0, 10)
+                    }
                 }
             }
-            
-            // 额外：直接查找涉及该字段的Orika映射
-            analyzeDirectOrikaRelationsForField(field, rootNode)
             
             return rootNode
             
@@ -82,8 +88,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
         visitedMethods.add(methodSignature)
         
         try {
-            // 首先检查当前方法是否包含Orika映射
-            if (containsOrikaMapping(method)) {
+            // 检查当前方法是否包含Orika映射（但如果当前节点已经是ORIKA_METHOD类型就跳过，避免重复）
+            if (containsOrikaMapping(method) && currentNode.nodeType != CallHierarchyNodeType.ORIKA_METHOD) {
                 analyzeOrikaRelatedCallsForField(originalField, method, currentNode)
             }
             
@@ -98,6 +104,387 @@ class CallHierarchyAnalyzer(private val project: Project) {
     }
     
     /**
+     * 分析字段的getter/setter方法并追踪调用链路
+     */
+    private fun analyzeFieldGetterSetterMethods(field: PsiField, rootNode: CallHierarchyNode) {
+        try {
+            val containingClass = field.containingClass ?: return
+            val fieldName = field.name
+            
+            // 查找显式声明的getter方法
+            val getterMethods = findGetterMethods(containingClass, fieldName)
+            for (getter in getterMethods) {
+                val getterNode = CallHierarchyNode(
+                    className = getter.containingClass?.qualifiedName ?: "Unknown",
+                    methodName = getter.name,
+                    displayName = "📍 ${getter.containingClass?.qualifiedName ?: "Unknown"}.${getter.name}",
+                    location = getElementLocation(getter),
+                    nodeType = CallHierarchyNodeType.GETTER_METHOD,
+                    psiElement = getter
+                )
+                rootNode.addChild(getterNode)
+                
+                // 追踪getter方法的调用链路
+                analyzeMethodCallHierarchyWithOrikaSupport(field, getter, getterNode, mutableSetOf(), 0, 10)
+            }
+            
+            // 查找显式声明的setter方法
+            val setterMethods = findSetterMethods(containingClass, fieldName)
+            for (setter in setterMethods) {
+                val setterNode = CallHierarchyNode(
+                    className = setter.containingClass?.qualifiedName ?: "Unknown",
+                    methodName = setter.name,
+                    displayName = "📍 ${setter.containingClass?.qualifiedName ?: "Unknown"}.${setter.name}",
+                    location = getElementLocation(setter),
+                    nodeType = CallHierarchyNodeType.SETTER_METHOD,
+                    psiElement = setter
+                )
+                rootNode.addChild(setterNode)
+                
+                // 追踪setter方法的调用链路
+                analyzeMethodCallHierarchyWithOrikaSupport(field, setter, setterNode, mutableSetOf(), 0, 10)
+            }
+            
+            // 总是检查Lombok生成的getter/setter方法（无论是否有显式方法）
+            analyzeVirtualLombokGetterSetterMethods(field, rootNode)
+            
+        } catch (e: Exception) {
+            // 静默处理异常
+        }
+    }
+    
+    /**
+     * 分析Lombok生成的虚拟getter/setter方法
+     */
+    private fun analyzeVirtualLombokGetterSetterMethods(field: PsiField, rootNode: CallHierarchyNode) {
+        try {
+            val containingClass = field.containingClass ?: return
+            val className = containingClass.qualifiedName ?: return
+            val fieldName = field.name
+            
+            // 检查是否有Lombok注解，如果没有就跳过
+            if (!hasLombokDataAnnotation(containingClass)) {
+                return
+            }
+            
+            // 标准getter/setter方法名
+            val getterName = "get${fieldName.replaceFirstChar { it.uppercase() }}"
+            val setterName = "set${fieldName.replaceFirstChar { it.uppercase() }}"
+            val booleanGetterName = "is${fieldName.replaceFirstChar { it.uppercase() }}"
+            
+            // 检查是否已经有显式的getter/setter方法
+            val hasExplicitGetter = containingClass.findMethodsByName(getterName, false).isNotEmpty() ||
+                                   containingClass.findMethodsByName(booleanGetterName, false).isNotEmpty()
+            val hasExplicitSetter = containingClass.findMethodsByName(setterName, false).isNotEmpty()
+            
+            // 如果没有显式的getter方法，显示Lombok生成的getter
+            if (!hasExplicitGetter) {
+                // 检查字段类型来决定使用哪种getter
+                val fieldType = field.type.canonicalText
+                val shouldUseBooleanGetter = fieldType == "boolean" || fieldType == "java.lang.Boolean"
+                
+                if (shouldUseBooleanGetter) {
+                    // 创建boolean getter节点
+                    val getterNode = CallHierarchyNode(
+                        className = className,
+                        methodName = booleanGetterName,
+                        displayName = "📍 $className.$booleanGetterName",
+                        location = getElementLocation(field),
+                        nodeType = CallHierarchyNodeType.GETTER_METHOD,
+                        psiElement = field
+                    )
+                    rootNode.addChild(getterNode)
+                    
+                    // 查找调用并添加子节点
+                    val getterCalls = findMethodCallsInProject(className, booleanGetterName)
+                    addCallSiteNodes(getterCalls, getterNode, field)
+                } else {
+                    // 创建普通getter节点
+                    val getterNode = CallHierarchyNode(
+                        className = className,
+                        methodName = getterName,
+                        displayName = "📍 $className.$getterName",
+                        location = getElementLocation(field),
+                        nodeType = CallHierarchyNodeType.GETTER_METHOD,
+                        psiElement = field
+                    )
+                    rootNode.addChild(getterNode)
+                    
+                    // 查找调用并添加子节点
+                    val getterCalls = findMethodCallsInProject(className, getterName)
+                    addCallSiteNodes(getterCalls, getterNode, field)
+                }
+            }
+            
+            // 如果没有显式的setter方法，显示Lombok生成的setter
+            if (!hasExplicitSetter) {
+                // 总是创建setter节点
+                val setterNode = CallHierarchyNode(
+                    className = className,
+                    methodName = setterName,
+                    displayName = "📍 $className.$setterName",
+                    location = getElementLocation(field),
+                    nodeType = CallHierarchyNodeType.SETTER_METHOD,
+                    psiElement = field
+                )
+                rootNode.addChild(setterNode)
+                
+                // 查找调用并添加子节点
+                val setterCalls = findMethodCallsInProject(className, setterName)
+                addCallSiteNodes(setterCalls, setterNode, field)
+            }
+            
+        } catch (e: Exception) {
+            // 静默处理异常
+        }
+    }
+    
+    /**
+     * 为调用点创建子节点
+     */
+    private fun addCallSiteNodes(calls: List<PsiElement>, parentNode: CallHierarchyNode, field: PsiField) {
+        val addedNodes = mutableSetOf<String>() // 用于去重的集合，格式为 "方法签名:行号"
+        
+        for (call in calls.take(10)) { // 增加处理数量以便去重后仍有足够的结果
+            val callerMethod = PsiTreeUtil.getParentOfType(call, PsiMethod::class.java)
+            if (callerMethod != null) {
+                // 计算调用点的行号
+                val lineNumber = getLineNumber(call)
+                val methodSignature = "${callerMethod.containingClass?.qualifiedName}.${callerMethod.name}"
+                val nodeKey = "$methodSignature:$lineNumber"
+                
+                // 检查是否已经添加过相同的方法调用（相同方法+相同行号）
+                if (!addedNodes.contains(nodeKey)) {
+                    val callerNode = createMethodNodeWithCallSiteAndLineNumber(callerMethod, call, lineNumber)
+                    if (callerNode != null) {
+                        parentNode.addChild(callerNode)
+                        addedNodes.add(nodeKey)
+                        
+                        // 继续追踪调用链路
+                        analyzeMethodCallHierarchyWithOrikaSupport(field, callerMethod, callerNode, mutableSetOf(), 1, 8)
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * 查找字段的getter方法（包括Lombok生成的方法）
+     */
+    private fun findGetterMethods(containingClass: PsiClass, fieldName: String): List<PsiMethod> {
+        val getterMethods = mutableListOf<PsiMethod>()
+        
+        try {
+            // 标准getter方法名
+            val getterName = "get${fieldName.replaceFirstChar { it.uppercase() }}"
+            val booleanGetterName = "is${fieldName.replaceFirstChar { it.uppercase() }}"
+            
+            // 1. 查找显式声明的getter方法
+            val explicitGetter = containingClass.findMethodsByName(getterName, false).firstOrNull()
+            if (explicitGetter != null) {
+                getterMethods.add(explicitGetter)
+            } else {
+                // 如果没有显式getter，且类有Lombok注解，检查项目中是否有对该getter的调用
+                if (hasLombokDataAnnotation(containingClass)) {
+                    // 对于Lombok生成的方法，我们将在analyzeFieldGetterSetterMethods中直接创建虚拟节点
+                    // 这里暂时跳过，因为无法创建真正的PsiMethod
+                }
+            }
+            
+            val explicitBooleanGetter = containingClass.findMethodsByName(booleanGetterName, false).firstOrNull()
+            if (explicitBooleanGetter != null) {
+                getterMethods.add(explicitBooleanGetter)
+            } else {
+                // 对于boolean字段，也检查Lombok生成的is方法
+                if (hasLombokDataAnnotation(containingClass)) {
+                    // 对于Lombok生成的方法，我们将在analyzeFieldGetterSetterMethods中直接创建虚拟节点
+                    // 这里暂时跳过，因为无法创建真正的PsiMethod
+                }
+            }
+            
+        } catch (e: Exception) {
+            // 静默处理异常
+        }
+        
+        return getterMethods
+    }
+    
+    /**
+     * 查找字段的setter方法（包括Lombok生成的方法）
+     */
+    private fun findSetterMethods(containingClass: PsiClass, fieldName: String): List<PsiMethod> {
+        val setterMethods = mutableListOf<PsiMethod>()
+        
+        try {
+            // 标准setter方法名
+            val setterName = "set${fieldName.replaceFirstChar { it.uppercase() }}"
+            
+            // 1. 查找显式声明的setter方法
+            val explicitSetter = containingClass.findMethodsByName(setterName, false).firstOrNull()
+            if (explicitSetter != null) {
+                setterMethods.add(explicitSetter)
+            } else {
+                // 如果没有显式setter，且类有Lombok注解，检查项目中是否有对该setter的调用
+                if (hasLombokDataAnnotation(containingClass)) {
+                    // 对于Lombok生成的方法，我们将在analyzeFieldGetterSetterMethods中直接创建虚拟节点
+                    // 这里暂时跳过，因为无法创建真正的PsiMethod
+                }
+            }
+            
+        } catch (e: Exception) {
+            // 静默处理异常
+        }
+        
+        return setterMethods
+    }
+    
+    /**
+     * 检查类是否有Lombok的@Data或其他相关注解
+     */
+    private fun hasLombokDataAnnotation(psiClass: PsiClass): Boolean {
+        return try {
+            psiClass.annotations.any { annotation ->
+                val qualifiedName = annotation.qualifiedName
+                qualifiedName == "lombok.Data" || 
+                qualifiedName == "lombok.Getter" || 
+                qualifiedName == "lombok.Setter" ||
+                qualifiedName == "Data" ||
+                qualifiedName == "Getter" ||
+                qualifiedName == "Setter"
+            }
+        } catch (e: Exception) {
+            // 如果注解检测失败，默认尝试检测Lombok方法
+            true
+        }
+    }
+    
+    /**
+     * 在项目中查找对指定方法的调用
+     */
+    private fun findMethodCallsInProject(className: String, methodName: String): List<PsiElement> {
+        val calls = mutableListOf<PsiElement>()
+        
+        try {
+            // 使用IDEA内置的搜索API来查找方法调用
+            // 首先尝试通过类名查找类
+            val targetClass = JavaPsiFacade.getInstance(project).findClass(className, GlobalSearchScope.projectScope(project))
+            
+            if (targetClass != null) {
+                // 查找所有对该类的引用
+                val classReferences = ReferencesSearch.search(targetClass, GlobalSearchScope.projectScope(project))
+                
+                for (ref in classReferences.take(100)) { // 限制处理数量
+                    val refElement = ref.element
+                    val containingFile = refElement.containingFile
+                    
+                    // 在包含该引用的文件中查找方法调用
+                    containingFile?.accept(object : JavaRecursiveElementVisitor() {
+                        override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
+                            super.visitMethodCallExpression(expression)
+                            
+                            // 检查方法名是否匹配
+                            if (expression.methodExpression.referenceName == methodName) {
+                                val qualifierExpression = expression.methodExpression.qualifierExpression
+                                if (qualifierExpression != null) {
+                                    // 检查调用的对象类型
+                                    val qualifierType = qualifierExpression.type?.canonicalText?.substringBefore('<')
+                                    if (qualifierType == className) {
+                                        calls.add(expression)
+                                    }
+                                } else {
+                                    // 检查是否是隐式this调用
+                                    val containingClass = PsiTreeUtil.getParentOfType(expression, PsiClass::class.java)
+                                    if (containingClass?.qualifiedName == className) {
+                                        calls.add(expression)
+                                    }
+                                }
+                            }
+                        }
+                    })
+                    
+                    if (calls.size >= 20) break // 限制查找数量
+                }
+            }
+            
+            // 如果通过类引用没找到，尝试直接搜索方法名
+            if (calls.isEmpty()) {
+                searchMethodCallsByName(className, methodName, calls)
+            }
+            
+        } catch (e: Exception) {
+            // 静默处理异常，尝试备用搜索方法
+            searchMethodCallsByName(className, methodName, calls)
+        }
+        
+        return calls
+    }
+    
+    /**
+     * 通过方法名直接搜索方法调用（备用方法）
+     */
+    private fun searchMethodCallsByName(className: String, methodName: String, calls: MutableList<PsiElement>) {
+        try {
+            // 搜索项目中的所有Java文件
+            val javaFiles = mutableListOf<PsiJavaFile>()
+            FileTypeIndex.processFiles(
+                JavaFileType.INSTANCE,
+                { virtualFile ->
+                    val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
+                    if (psiFile is PsiJavaFile) {
+                        javaFiles.add(psiFile)
+                    }
+                    true
+                },
+                GlobalSearchScope.projectScope(project)
+            )
+            
+            // 在每个文件中查找方法调用
+            for (javaFile in javaFiles.take(30)) { // 限制搜索文件数量
+                javaFile.accept(object : JavaRecursiveElementVisitor() {
+                    override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
+                        super.visitMethodCallExpression(expression)
+                        
+                        // 检查方法名是否匹配
+                        if (expression.methodExpression.referenceName == methodName) {
+                            // 检查调用的对象类型是否匹配
+                            val qualifierExpression = expression.methodExpression.qualifierExpression
+                            if (qualifierExpression != null) {
+                                val qualifierType = qualifierExpression.type?.canonicalText?.substringBefore('<')
+                                if (qualifierType == className) {
+                                    calls.add(expression)
+                                }
+                            } else {
+                                // 检查是否是隐式this调用
+                                val containingClass = PsiTreeUtil.getParentOfType(expression, PsiClass::class.java)
+                                if (containingClass?.qualifiedName == className) {
+                                    calls.add(expression)
+                                }
+                            }
+                        }
+                    }
+                })
+                
+                if (calls.size >= 15) break // 限制查找数量
+            }
+        } catch (e: Exception) {
+            // 静默处理异常
+        }
+    }
+    
+    
+    /**
+     * 检查方法是否是指定字段的getter/setter方法
+     */
+    private fun isGetterSetterMethod(method: PsiMethod, fieldName: String): Boolean {
+        val methodName = method.name
+        val getterName = "get${fieldName.replaceFirstChar { it.uppercase() }}"
+        val setterName = "set${fieldName.replaceFirstChar { it.uppercase() }}"
+        val booleanGetterName = "is${fieldName.replaceFirstChar { it.uppercase() }}"
+        
+        return methodName == getterName || methodName == setterName || methodName == booleanGetterName
+    }
+    
+    /**
      * 针对特定字段分析直接的Orika映射关系
      */
     private fun analyzeDirectOrikaRelationsForField(field: PsiField, rootNode: CallHierarchyNode) {
@@ -109,58 +496,23 @@ class CallHierarchyAnalyzer(private val project: Project) {
             val mappingCalls: List<MappingCall> = findOrikaMappingCallsWithPsi(field)
             
             for (mappingCall in mappingCalls.take(5)) { // 限制数量
-                // 为每个映射调用创建一个节点，并设置正确的PSI元素用于跳转
-                val mappingNode = CallHierarchyNode(
-                    className = mappingCall.className,
-                    methodName = "orika.map",
-                    displayName = "Orika映射: ${extractOrikaCallInfo(mappingCall.psiElement ?: continue)}",
-                    location = mappingCall.location,
-                    nodeType = CallHierarchyNodeType.ORIKA_MAPPING,
-                    psiElement = mappingCall.psiElement
-                )
-                rootNode.addChild(mappingNode)
-                
-                // 从映射的目标类继续追踪
-                if (mappingCall.psiElement is PsiMethodCallExpression) {
-                    val args = mappingCall.psiElement.argumentList.expressions
-                    if (args.size >= 2) {
-                        val sourceType = extractTypeFromExpression(args[0])
-                        val targetType = extractTypeFromExpression(args[1])
-                        
-                        // 确定目标类型（与原字段所在类不同的那个）
-                        val relevantTargetType = if (sourceType == fieldClass) targetType else sourceType
-                        if (relevantTargetType != null) {
-                            val targetField = findFieldInClass(relevantTargetType, fieldName)
-                            if (targetField != null) {
-                                // 查找使用目标字段的方法，继续追踪
-                                val targetMethods = findMethodsUsingField(targetField)
-                                for (targetMethod in targetMethods.take(3)) {
-                                    val targetMethodNode = createMethodNode(targetMethod)
-                                    if (targetMethodNode != null) {
-                                        mappingNode.addChild(targetMethodNode)
-                                        // 继续向上追踪调用链路
-                                        analyzeMethodCallHierarchyWithOrikaSupport(targetField, targetMethod, targetMethodNode, mutableSetOf(), 1, 8)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // 额外：从包含映射调用的方法向上追踪
-                val mappingMethod = PsiTreeUtil.getParentOfType(mappingCall.psiElement, PsiMethod::class.java)
-                if (mappingMethod != null) {
-                    val callers = findMethodCallers(mappingMethod)
-                    for (caller in callers.take(3)) {
-                        val callerNode = createMethodNode(caller)
-                        if (callerNode != null) {
-                            mappingNode.addChild(callerNode)
-                            // 继续向上追踪
-                            if (!isControllerMethod(caller)) {
-                                analyzeMethodCallHierarchyWithOrikaSupport(field, caller, callerNode, mutableSetOf(), 1, 6)
-                            }
-                        }
-                    }
+                // 获取包含映射的方法
+                val containingMethod = PsiTreeUtil.getParentOfType(mappingCall.psiElement, PsiMethod::class.java)
+                if (containingMethod != null) {
+                    // 创建包含映射信息的方法节点
+                    val orikaInfo = extractOrikaCallInfo(mappingCall.psiElement ?: continue)
+                    val methodNode = CallHierarchyNode(
+                        className = mappingCall.className,
+                        methodName = containingMethod.name,
+                        displayName = "🔗 ${mappingCall.className}.${containingMethod.name}(Orika映射: $orikaInfo)",
+                        location = mappingCall.location, // 使用映射调用的位置，便于跳转到映射行
+                        nodeType = CallHierarchyNodeType.ORIKA_METHOD,
+                        psiElement = mappingCall.psiElement // 使用映射调用的PSI元素，便于跳转
+                    )
+                    rootNode.addChild(methodNode)
+                    
+                    // 从包含映射的方法继续追踪调用链路（查找谁调用了这个方法）
+                    analyzeMethodCallHierarchyWithOrikaSupport(field, containingMethod, methodNode, mutableSetOf(), 1, 8)
                 }
             }
         } catch (e: Exception) {
@@ -257,7 +609,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                             val orikaNode = CallHierarchyNode(
                                 className = containingClass?.qualifiedName ?: "Unknown",
                                 methodName = "orika.map",
-                                displayName = "Orika映射: ${extractOrikaCallInfo(reference)}",
+                                displayName = "📍 Orika映射: ${extractOrikaCallInfo(reference)}",
                                 location = getElementLocation(reference),
                                 nodeType = CallHierarchyNodeType.ORIKA_MAPPING,
                                 psiElement = reference
@@ -413,18 +765,47 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 }
             }
             
-            for (callerMethod in callerMethods.take(5)) { // 限制数量避免性能问题
-                val callSites = methodToCallSites[callerMethod] ?: emptyList()
-                
-                if (callSites.isNotEmpty()) {
-                    // 如果一个方法有多个调用点，为每个调用点创建一个节点
-                    for (callSite in callSites.take(3)) { // 限制每个方法的调用点数量
-                        val callerNode = createMethodNodeWithCallSite(callerMethod, callSite)
+            // 使用去重逻辑处理调用者
+            addCallerNodesWithDeduplication(callerMethods.take(5), methodToCallSites, currentNode, originalField, visitedMethods, depth, maxDepth)
+            
+        } catch (e: Exception) {
+            // 静默处理异常
+        }
+    }
+    
+    /**
+     * 添加调用者节点并进行去重
+     */
+    private fun addCallerNodesWithDeduplication(
+        callerMethods: List<PsiMethod>,
+        methodToCallSites: Map<PsiMethod, List<PsiElement>>,
+        currentNode: CallHierarchyNode,
+        originalField: PsiField,
+        visitedMethods: MutableSet<String>,
+        depth: Int,
+        maxDepth: Int
+    ) {
+        val addedNodes = mutableSetOf<String>() // 用于去重的集合，格式为 "方法签名:行号"
+        
+        for (callerMethod in callerMethods) {
+            val callSites = methodToCallSites[callerMethod] ?: emptyList()
+            
+            if (callSites.isNotEmpty()) {
+                // 如果一个方法有多个调用点，为每个调用点创建一个节点
+                for (callSite in callSites.take(3)) { // 限制每个方法的调用点数量
+                    val lineNumber = getLineNumber(callSite)
+                    val methodSignature = "${callerMethod.containingClass?.qualifiedName}.${callerMethod.name}"
+                    val nodeKey = "$methodSignature:$lineNumber"
+                    
+                    // 检查是否已经添加过相同的方法调用（相同方法+相同行号）
+                    if (!addedNodes.contains(nodeKey)) {
+                        val callerNode = createMethodNodeWithCallSiteAndLineNumber(callerMethod, callSite, lineNumber)
                         if (callerNode != null) {
                             currentNode.addChild(callerNode)
+                            addedNodes.add(nodeKey)
                             
-                            // 检查是否包含Orika映射
-                            if (containsOrikaMapping(callerMethod)) {
+                            // 检查是否包含Orika映射（避免在ORIKA_METHOD节点下重复添加）
+                            if (containsOrikaMapping(callerMethod) && callerNode.nodeType != CallHierarchyNodeType.ORIKA_METHOD) {
                                 analyzeOrikaRelatedCallsForField(originalField, callerMethod, callerNode)
                             }
                             
@@ -433,14 +814,20 @@ class CallHierarchyAnalyzer(private val project: Project) {
                             }
                         }
                     }
-                } else {
-                    // 如果没有调用点信息，使用原来的方法
+                }
+            } else {
+                // 如果没有调用点信息，使用原来的方法
+                val methodSignature = "${callerMethod.containingClass?.qualifiedName}.${callerMethod.name}"
+                val nodeKey = "$methodSignature:0" // 使用0作为未知行号的标识
+                
+                if (!addedNodes.contains(nodeKey)) {
                     val callerNode = createMethodNode(callerMethod)
                     if (callerNode != null) {
                         currentNode.addChild(callerNode)
+                        addedNodes.add(nodeKey)
                         
-                        // 检查是否包含Orika映射
-                        if (containsOrikaMapping(callerMethod)) {
+                        // 检查是否包含Orika映射（避免在ORIKA_METHOD节点下重复添加）
+                        if (containsOrikaMapping(callerMethod) && callerNode.nodeType != CallHierarchyNodeType.ORIKA_METHOD) {
                             analyzeOrikaRelatedCallsForField(originalField, callerMethod, callerNode)
                         }
                     
@@ -450,8 +837,6 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     }
                 }
             }
-        } catch (e: Exception) {
-            // 静默处理异常
         }
     }
     
@@ -506,18 +891,45 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 }
             }
             
-            for (callerMethod in callerMethods.take(5)) { // 限制数量避免性能问题
-                val callSites = methodToCallSites[callerMethod] ?: emptyList()
-                
-                if (callSites.isNotEmpty()) {
-                    // 如果一个方法有多个调用点，为每个调用点创建一个节点
-                    for (callSite in callSites.take(3)) { // 限制每个方法的调用点数量
-                        val callerNode = createMethodNodeWithCallSite(callerMethod, callSite)
+            // 使用去重逻辑处理调用者
+            addSimpleCallerNodesWithDeduplication(callerMethods.take(5), methodToCallSites, currentNode, visitedMethods, depth, maxDepth)
+        } catch (e: Exception) {
+            // 静默处理异常
+        }
+    }
+    
+    /**
+     * 添加简单调用者节点并进行去重（用于fallbackToSimpleReferenceSearch）
+     */
+    private fun addSimpleCallerNodesWithDeduplication(
+        callerMethods: List<PsiMethod>,
+        methodToCallSites: Map<PsiMethod, List<PsiElement>>,
+        currentNode: CallHierarchyNode,
+        visitedMethods: MutableSet<String>,
+        depth: Int,
+        maxDepth: Int
+    ) {
+        val addedNodes = mutableSetOf<String>() // 用于去重的集合，格式为 "方法签名:行号"
+        
+        for (callerMethod in callerMethods) {
+            val callSites = methodToCallSites[callerMethod] ?: emptyList()
+            
+            if (callSites.isNotEmpty()) {
+                // 如果一个方法有多个调用点，为每个调用点创建一个节点
+                for (callSite in callSites.take(3)) { // 限制每个方法的调用点数量
+                    val lineNumber = getLineNumber(callSite)
+                    val methodSignature = "${callerMethod.containingClass?.qualifiedName}.${callerMethod.name}"
+                    val nodeKey = "$methodSignature:$lineNumber"
+                    
+                    // 检查是否已经添加过相同的方法调用（相同方法+相同行号）
+                    if (!addedNodes.contains(nodeKey)) {
+                        val callerNode = createMethodNodeWithCallSiteAndLineNumber(callerMethod, callSite, lineNumber)
                         if (callerNode != null) {
                             currentNode.addChild(callerNode)
+                            addedNodes.add(nodeKey)
                             
-                            // 检查是否包含Orika映射
-                            if (containsOrikaMapping(callerMethod)) {
+                            // 检查是否包含Orika映射（避免在ORIKA_METHOD节点下重复添加）
+                            if (containsOrikaMapping(callerMethod) && callerNode.nodeType != CallHierarchyNodeType.ORIKA_METHOD) {
                                 analyzeOrikaRelatedCalls(callerMethod, callerNode)
                             }
                             
@@ -526,14 +938,20 @@ class CallHierarchyAnalyzer(private val project: Project) {
                             }
                         }
                     }
-                } else {
-                    // 如果没有调用点信息，使用原来的方法
+                }
+            } else {
+                // 如果没有调用点信息，使用原来的方法
+                val methodSignature = "${callerMethod.containingClass?.qualifiedName}.${callerMethod.name}"
+                val nodeKey = "$methodSignature:0" // 使用0作为未知行号的标识
+                
+                if (!addedNodes.contains(nodeKey)) {
                     val callerNode = createMethodNode(callerMethod)
                     if (callerNode != null) {
                         currentNode.addChild(callerNode)
+                        addedNodes.add(nodeKey)
                         
-                        // 检查是否包含Orika映射
-                        if (containsOrikaMapping(callerMethod)) {
+                        // 检查是否包含Orika映射（避免在ORIKA_METHOD节点下重复添加）
+                        if (containsOrikaMapping(callerMethod) && callerNode.nodeType != CallHierarchyNodeType.ORIKA_METHOD) {
                             analyzeOrikaRelatedCalls(callerMethod, callerNode)
                         }
                         
@@ -543,8 +961,6 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     }
                 }
             }
-        } catch (e: Exception) {
-            // 静默处理异常
         }
     }
     
@@ -581,7 +997,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 val orikaNode = CallHierarchyNode(
                     className = containingClass?.qualifiedName ?: "Unknown",
                     methodName = "orika.map",
-                    displayName = "Orika映射: ${extractOrikaCallInfo(reference)}",
+                    displayName = "📍 Orika映射: ${extractOrikaCallInfo(reference)}",
                     location = getElementLocation(reference),
                     nodeType = CallHierarchyNodeType.ORIKA_MAPPING,
                     psiElement = reference
@@ -972,6 +1388,44 @@ class CallHierarchyAnalyzer(private val project: Project) {
         }
     }
     
+    /**
+     * 创建带有调用点信息和行号的方法节点
+     */
+    private fun createMethodNodeWithCallSiteAndLineNumber(method: PsiMethod, callSite: PsiElement, lineNumber: Int): CallHierarchyNode? {
+        try {
+            val className = method.containingClass?.qualifiedName ?: "Unknown"
+            val methodName = method.name
+            val nodeType = determineNodeType(method)
+            
+            return CallHierarchyNode(
+                className = className,
+                methodName = methodName,
+                displayName = "📍 $className.$methodName:$lineNumber", // 在显示名称中包含行号
+                location = getElementLocation(callSite), // 使用调用点的位置而不是方法定义的位置
+                nodeType = nodeType,
+                psiElement = callSite // 使用调用点的PSI元素用于跳转
+            )
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    
+    /**
+     * 获取PSI元素的行号
+     */
+    private fun getLineNumber(element: PsiElement): Int {
+        return try {
+            val document = PsiDocumentManager.getInstance(project).getDocument(element.containingFile)
+            if (document != null) {
+                document.getLineNumber(element.textOffset) + 1
+            } else {
+                0
+            }
+        } catch (e: Exception) {
+            0
+        }
+    }
+    
     
     /**
      * 确定节点类型
@@ -986,6 +1440,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
             className.lowercase().contains("repository") || 
             className.lowercase().contains("dao") -> CallHierarchyNodeType.REPOSITORY
             methodName == "<init>" -> CallHierarchyNodeType.CONSTRUCTOR_CALL
+            methodName.startsWith("get") || methodName.startsWith("is") -> CallHierarchyNodeType.GETTER_METHOD
+            methodName.startsWith("set") -> CallHierarchyNodeType.SETTER_METHOD
             else -> CallHierarchyNodeType.METHOD_CALL
         }
     }
