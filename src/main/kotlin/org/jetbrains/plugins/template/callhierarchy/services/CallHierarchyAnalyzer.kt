@@ -105,48 +105,15 @@ class CallHierarchyAnalyzer(private val project: Project) {
     
     /**
      * 分析字段的getter/setter方法并追踪调用链路
+     * 强制为每个字段创建虚拟的getter/setter节点，确保链路追踪的完整性
      */
     private fun analyzeFieldGetterSetterMethods(field: PsiField, rootNode: CallHierarchyNode) {
         try {
             val containingClass = field.containingClass ?: return
             val fieldName = field.name
             
-            // 查找显式声明的getter方法
-            val getterMethods = findGetterMethods(containingClass, fieldName)
-            for (getter in getterMethods) {
-                val getterNode = CallHierarchyNode(
-                    className = getter.containingClass?.qualifiedName ?: "Unknown",
-                    methodName = getter.name,
-                    displayName = "📍 ${getter.containingClass?.qualifiedName ?: "Unknown"}.${getter.name}",
-                    location = getElementLocation(getter),
-                    nodeType = CallHierarchyNodeType.GETTER_METHOD,
-                    psiElement = getter
-                )
-                rootNode.addChild(getterNode)
-                
-                // 追踪getter方法的调用链路
-                analyzeMethodCallHierarchyWithOrikaSupport(field, getter, getterNode, mutableSetOf(), 0, 10)
-            }
-            
-            // 查找显式声明的setter方法
-            val setterMethods = findSetterMethods(containingClass, fieldName)
-            for (setter in setterMethods) {
-                val setterNode = CallHierarchyNode(
-                    className = setter.containingClass?.qualifiedName ?: "Unknown",
-                    methodName = setter.name,
-                    displayName = "📍 ${setter.containingClass?.qualifiedName ?: "Unknown"}.${setter.name}",
-                    location = getElementLocation(setter),
-                    nodeType = CallHierarchyNodeType.SETTER_METHOD,
-                    psiElement = setter
-                )
-                rootNode.addChild(setterNode)
-                
-                // 追踪setter方法的调用链路
-                analyzeMethodCallHierarchyWithOrikaSupport(field, setter, setterNode, mutableSetOf(), 0, 10)
-            }
-            
-            // 总是检查Lombok生成的getter/setter方法（无论是否有显式方法）
-            analyzeVirtualLombokGetterSetterMethods(field, rootNode)
+            // 强制创建虚拟的getter/setter节点（不管是否有显式声明或Lombok注解）
+            analyzeVirtualGetterSetterMethods(field, rootNode)
             
         } catch (e: Exception) {
             // 静默处理异常
@@ -154,85 +121,71 @@ class CallHierarchyAnalyzer(private val project: Project) {
     }
     
     /**
-     * 分析Lombok生成的虚拟getter/setter方法
+     * 强制为字段创建虚拟的getter/setter方法节点
+     * 不管是否有显式声明或Lombok注解，都创建虚拟节点以确保链路追踪的完整性
      */
-    private fun analyzeVirtualLombokGetterSetterMethods(field: PsiField, rootNode: CallHierarchyNode) {
+    private fun analyzeVirtualGetterSetterMethods(field: PsiField, rootNode: CallHierarchyNode) {
         try {
             val containingClass = field.containingClass ?: return
             val className = containingClass.qualifiedName ?: return
             val fieldName = field.name
-            
-            // 检查是否有Lombok注解，如果没有就跳过
-            if (!hasLombokDataAnnotation(containingClass)) {
-                return
-            }
             
             // 标准getter/setter方法名
             val getterName = "get${fieldName.replaceFirstChar { it.uppercase() }}"
             val setterName = "set${fieldName.replaceFirstChar { it.uppercase() }}"
             val booleanGetterName = "is${fieldName.replaceFirstChar { it.uppercase() }}"
             
-            // 检查是否已经有显式的getter/setter方法
-            val hasExplicitGetter = containingClass.findMethodsByName(getterName, false).isNotEmpty() ||
-                                   containingClass.findMethodsByName(booleanGetterName, false).isNotEmpty()
-            val hasExplicitSetter = containingClass.findMethodsByName(setterName, false).isNotEmpty()
+            // 强制创建getter节点（不检查是否已有显式声明）
+            // 检查字段类型来决定使用哪种getter
+            val fieldType = field.type.canonicalText
+            val shouldUseBooleanGetter = fieldType == "boolean" || fieldType == "java.lang.Boolean"
             
-            // 如果没有显式的getter方法，显示Lombok生成的getter
-            if (!hasExplicitGetter) {
-                // 检查字段类型来决定使用哪种getter
-                val fieldType = field.type.canonicalText
-                val shouldUseBooleanGetter = fieldType == "boolean" || fieldType == "java.lang.Boolean"
-                
-                if (shouldUseBooleanGetter) {
-                    // 创建boolean getter节点
-                    val getterNode = CallHierarchyNode(
-                        className = className,
-                        methodName = booleanGetterName,
-                        displayName = "📍 $className.$booleanGetterName",
-                        location = getElementLocation(field),
-                        nodeType = CallHierarchyNodeType.GETTER_METHOD,
-                        psiElement = field
-                    )
-                    rootNode.addChild(getterNode)
-                    
-                    // 查找调用并添加子节点
-                    val getterCalls = findMethodCallsInProject(className, booleanGetterName)
-                    addCallSiteNodes(getterCalls, getterNode, field)
-                } else {
-                    // 创建普通getter节点
-                    val getterNode = CallHierarchyNode(
-                        className = className,
-                        methodName = getterName,
-                        displayName = "📍 $className.$getterName",
-                        location = getElementLocation(field),
-                        nodeType = CallHierarchyNodeType.GETTER_METHOD,
-                        psiElement = field
-                    )
-                    rootNode.addChild(getterNode)
-                    
-                    // 查找调用并添加子节点
-                    val getterCalls = findMethodCallsInProject(className, getterName)
-                    addCallSiteNodes(getterCalls, getterNode, field)
-                }
-            }
-            
-            // 如果没有显式的setter方法，显示Lombok生成的setter
-            if (!hasExplicitSetter) {
-                // 总是创建setter节点
-                val setterNode = CallHierarchyNode(
+            if (shouldUseBooleanGetter) {
+                // 创建boolean getter节点
+                val getterNode = CallHierarchyNode(
                     className = className,
-                    methodName = setterName,
-                    displayName = "📍 $className.$setterName",
+                    methodName = booleanGetterName,
+                    displayName = "📍 $className.$booleanGetterName",
                     location = getElementLocation(field),
-                    nodeType = CallHierarchyNodeType.SETTER_METHOD,
+                    nodeType = CallHierarchyNodeType.GETTER_METHOD,
                     psiElement = field
                 )
-                rootNode.addChild(setterNode)
+                rootNode.addChild(getterNode)
                 
                 // 查找调用并添加子节点
-                val setterCalls = findMethodCallsInProject(className, setterName)
-                addCallSiteNodes(setterCalls, setterNode, field)
+                val getterCalls = findMethodCallsInProject(className, booleanGetterName)
+                addCallSiteNodes(getterCalls, getterNode, field)
+            } else {
+                // 创建普通getter节点
+                val getterNode = CallHierarchyNode(
+                    className = className,
+                    methodName = getterName,
+                    displayName = "📍 $className.$getterName",
+                    location = getElementLocation(field),
+                    nodeType = CallHierarchyNodeType.GETTER_METHOD,
+                    psiElement = field
+                )
+                rootNode.addChild(getterNode)
+                
+                // 查找调用并添加子节点
+                val getterCalls = findMethodCallsInProject(className, getterName)
+                addCallSiteNodes(getterCalls, getterNode, field)
             }
+            
+            // 强制创建setter节点（不检查是否已有显式声明）
+            val setterNode = CallHierarchyNode(
+                className = className,
+                methodName = setterName,
+                displayName = "📍 $className.$setterName",
+                location = getElementLocation(field),
+                nodeType = CallHierarchyNodeType.SETTER_METHOD,
+                psiElement = field
+            )
+            rootNode.addChild(setterNode)
+            
+            // 查找调用并添加子节点
+            val setterCalls = findMethodCallsInProject(className, setterName)
+            addCallSiteNodes(setterCalls, setterNode, field)
             
         } catch (e: Exception) {
             // 静默处理异常
@@ -265,96 +218,6 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     }
                 }
             }
-        }
-    }
-    
-    /**
-     * 查找字段的getter方法（包括Lombok生成的方法）
-     */
-    private fun findGetterMethods(containingClass: PsiClass, fieldName: String): List<PsiMethod> {
-        val getterMethods = mutableListOf<PsiMethod>()
-        
-        try {
-            // 标准getter方法名
-            val getterName = "get${fieldName.replaceFirstChar { it.uppercase() }}"
-            val booleanGetterName = "is${fieldName.replaceFirstChar { it.uppercase() }}"
-            
-            // 1. 查找显式声明的getter方法
-            val explicitGetter = containingClass.findMethodsByName(getterName, false).firstOrNull()
-            if (explicitGetter != null) {
-                getterMethods.add(explicitGetter)
-            } else {
-                // 如果没有显式getter，且类有Lombok注解，检查项目中是否有对该getter的调用
-                if (hasLombokDataAnnotation(containingClass)) {
-                    // 对于Lombok生成的方法，我们将在analyzeFieldGetterSetterMethods中直接创建虚拟节点
-                    // 这里暂时跳过，因为无法创建真正的PsiMethod
-                }
-            }
-            
-            val explicitBooleanGetter = containingClass.findMethodsByName(booleanGetterName, false).firstOrNull()
-            if (explicitBooleanGetter != null) {
-                getterMethods.add(explicitBooleanGetter)
-            } else {
-                // 对于boolean字段，也检查Lombok生成的is方法
-                if (hasLombokDataAnnotation(containingClass)) {
-                    // 对于Lombok生成的方法，我们将在analyzeFieldGetterSetterMethods中直接创建虚拟节点
-                    // 这里暂时跳过，因为无法创建真正的PsiMethod
-                }
-            }
-            
-        } catch (e: Exception) {
-            // 静默处理异常
-        }
-        
-        return getterMethods
-    }
-    
-    /**
-     * 查找字段的setter方法（包括Lombok生成的方法）
-     */
-    private fun findSetterMethods(containingClass: PsiClass, fieldName: String): List<PsiMethod> {
-        val setterMethods = mutableListOf<PsiMethod>()
-        
-        try {
-            // 标准setter方法名
-            val setterName = "set${fieldName.replaceFirstChar { it.uppercase() }}"
-            
-            // 1. 查找显式声明的setter方法
-            val explicitSetter = containingClass.findMethodsByName(setterName, false).firstOrNull()
-            if (explicitSetter != null) {
-                setterMethods.add(explicitSetter)
-            } else {
-                // 如果没有显式setter，且类有Lombok注解，检查项目中是否有对该setter的调用
-                if (hasLombokDataAnnotation(containingClass)) {
-                    // 对于Lombok生成的方法，我们将在analyzeFieldGetterSetterMethods中直接创建虚拟节点
-                    // 这里暂时跳过，因为无法创建真正的PsiMethod
-                }
-            }
-            
-        } catch (e: Exception) {
-            // 静默处理异常
-        }
-        
-        return setterMethods
-    }
-    
-    /**
-     * 检查类是否有Lombok的@Data或其他相关注解
-     */
-    private fun hasLombokDataAnnotation(psiClass: PsiClass): Boolean {
-        return try {
-            psiClass.annotations.any { annotation ->
-                val qualifiedName = annotation.qualifiedName
-                qualifiedName == "lombok.Data" || 
-                qualifiedName == "lombok.Getter" || 
-                qualifiedName == "lombok.Setter" ||
-                qualifiedName == "Data" ||
-                qualifiedName == "Getter" ||
-                qualifiedName == "Setter"
-            }
-        } catch (e: Exception) {
-            // 如果注解检测失败，默认尝试检测Lombok方法
-            true
         }
     }
     
