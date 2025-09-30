@@ -1,8 +1,8 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.wangfan1314.orikahelper</id>
+    <id>org.jetbrains.plugins.template</id>
     <name>Orika Mapping Tracer</name>
-    <vendor>wangfan1314</vendor>
+    <vendor>JetBrains</vendor>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.java</depends>
@@ -11,20 +11,32 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.wangfan1314.orikahelper.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <toolWindow factoryClass="com.github.wangfan1314.orikahelper.ui.CallHierarchyToolWindowFactory" 
+        <toolWindow factoryClass="org.jetbrains.plugins.template.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="org.jetbrains.plugins.template.ui.CallHierarchyToolWindowFactory" 
                     id="Orika映射调用链" 
                     anchor="bottom" 
                     secondary="true"/>
-        <postStartupActivity implementation="com.github.wangfan1314.orikahelper.startup.MyProjectActivity" />
+        <toolWindow factoryClass="org.jetbrains.plugins.template.callhierarchy.ui.CallHierarchyTreeWindowFactory" 
+                    id="调用链路" 
+                    anchor="bottom" 
+                    secondary="true"/>
+        <postStartupActivity implementation="org.jetbrains.plugins.template.startup.MyProjectActivity" />
     </extensions>
 
     <actions>
-        <action id="OrikaMappingTracer.ShowCallHierarchy" 
-                class="com.github.wangfan1314.orikahelper.actions.OrikaMappingTracerAction"
-                text="显示Orika映射调用链"
-                description="显示选中字段的Orika映射调用链路">
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift O"/>
-        </action>
+        <group id="OrikaGroup" text="Orika映射分析" description="Orika映射相关功能">
+            <action id="OrikaMappingTracer.ShowMappingRelations" 
+                    class="org.jetbrains.plugins.template.actions.OrikaMappingTracerAction"
+                    text="显示映射关系"
+                    description="显示选中字段的Orika映射关系">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift M"/>
+            </action>
+            <action id="OrikaMappingTracer.ShowCallHierarchy" 
+                    class="org.jetbrains.plugins.template.callhierarchy.actions.ShowCallHierarchyAction"
+                    text="显示调用链路"
+                    description="显示选中字段的完整调用链路（包含Orika映射补充）">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift O"/>
+            </action>
+        </group>
     </actions>
 </idea-plugin>
