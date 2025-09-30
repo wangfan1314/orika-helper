@@ -11,28 +11,28 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="org.jetbrains.plugins.template.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <toolWindow factoryClass="org.jetbrains.plugins.template.ui.CallHierarchyToolWindowFactory" 
+        <toolWindow factoryClass="com.github.wangfan1314.orikahelper.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="com.github.wangfan1314.orikahelper.ui.CallHierarchyToolWindowFactory" 
                     id="Orika映射调用链" 
                     anchor="bottom" 
                     secondary="true"/>
-        <toolWindow factoryClass="org.jetbrains.plugins.template.callhierarchy.ui.CallHierarchyTreeWindowFactory" 
+        <toolWindow factoryClass="com.github.wangfan1314.orikahelper.callhierarchy.ui.CallHierarchyTreeWindowFactory" 
                     id="调用链路" 
                     anchor="bottom" 
                     secondary="true"/>
-        <postStartupActivity implementation="org.jetbrains.plugins.template.startup.MyProjectActivity" />
+        <postStartupActivity implementation="com.github.wangfan1314.orikahelper.startup.MyProjectActivity" />
     </extensions>
 
     <actions>
         <group id="OrikaGroup" text="Orika映射分析" description="Orika映射相关功能">
             <action id="OrikaMappingTracer.ShowMappingRelations" 
-                    class="org.jetbrains.plugins.template.actions.OrikaMappingTracerAction"
+                    class="com.github.wangfan1314.orikahelper.actions.OrikaMappingTracerAction"
                     text="显示映射关系"
                     description="显示选中字段的Orika映射关系">
                 <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift M"/>
             </action>
             <action id="OrikaMappingTracer.ShowCallHierarchy" 
-                    class="org.jetbrains.plugins.template.callhierarchy.actions.ShowCallHierarchyAction"
+                    class="com.github.wangfan1314.orikahelper.callhierarchy.actions.ShowCallHierarchyAction"
                     text="显示调用链路"
                     description="显示选中字段的完整调用链路（包含Orika映射补充）">
                 <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift O"/>

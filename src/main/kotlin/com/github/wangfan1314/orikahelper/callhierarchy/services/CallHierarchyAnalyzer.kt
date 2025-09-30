@@ -1,4 +1,4 @@
-package org.jetbrains.plugins.template.callhierarchy.services
+package com.github.wangfan1314.orikahelper.callhierarchy.services
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -13,10 +13,10 @@ import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.ide.hierarchy.call.CallerMethodsTreeStructure
 import com.intellij.ide.hierarchy.HierarchyNodeDescriptor
 import com.intellij.ide.hierarchy.call.CallHierarchyNodeDescriptor
-import org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNode
-import org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNodeType
-import org.jetbrains.plugins.template.services.OrikaMappingAnalyzer
-import org.jetbrains.plugins.template.model.MappingCall
+import com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode
+import com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNodeType
+import com.github.wangfan1314.orikahelper.services.OrikaMappingAnalyzer
+import com.github.wangfan1314.orikahelper.model.MappingCall
 
 /**
  * 调用层级分析器
@@ -56,7 +56,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             val rootNode = CallHierarchyNode(
                 className = field.containingClass?.qualifiedName ?: "Unknown",
                 methodName = field.name,
-                displayName = "📍 字段: ${field.containingClass?.name}.${field.name}",
+                displayName = "字段: ${field.containingClass?.name}.${field.name}",
                 location = getElementLocation(field),
                 nodeType = CallHierarchyNodeType.ROOT,
                 psiElement = field
@@ -168,7 +168,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 val getterNode = CallHierarchyNode(
                     className = className,
                     methodName = booleanGetterName,
-                    displayName = "📍 $className.$booleanGetterName",
+                    displayName = "$className.$booleanGetterName",
                     location = getElementLocation(field),
                     nodeType = CallHierarchyNodeType.GETTER_METHOD,
                     psiElement = field
@@ -183,7 +183,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 val getterNode = CallHierarchyNode(
                     className = className,
                     methodName = getterName,
-                    displayName = "📍 $className.$getterName",
+                    displayName = "$className.$getterName",
                     location = getElementLocation(field),
                     nodeType = CallHierarchyNodeType.GETTER_METHOD,
                     psiElement = field
@@ -199,7 +199,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             val setterNode = CallHierarchyNode(
                 className = className,
                 methodName = setterName,
-                displayName = "📍 $className.$setterName",
+                displayName = "$className.$setterName",
                 location = getElementLocation(field),
                 nodeType = CallHierarchyNodeType.SETTER_METHOD,
                 psiElement = field
@@ -525,7 +525,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                             val orikaNode = CallHierarchyNode(
                                 className = containingClass?.qualifiedName ?: "Unknown",
                                 methodName = "orika.map",
-                                displayName = "📍 Orika映射: ${extractOrikaCallInfo(reference)}",
+                                displayName = "Orika映射: ${extractOrikaCallInfo(reference)}",
                                 location = getElementLocation(reference),
                                 nodeType = CallHierarchyNodeType.ORIKA_MAPPING,
                                 psiElement = reference
@@ -1024,7 +1024,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 val orikaNode = CallHierarchyNode(
                     className = containingClass?.qualifiedName ?: "Unknown",
                     methodName = "orika.map",
-                    displayName = "📍 Orika映射: ${extractOrikaCallInfo(reference)}",
+                    displayName = "Orika映射: ${extractOrikaCallInfo(reference)}",
                     location = getElementLocation(reference),
                     nodeType = CallHierarchyNodeType.ORIKA_MAPPING,
                     psiElement = reference
@@ -1421,7 +1421,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             return CallHierarchyNode(
                 className = className,
                 methodName = methodName,
-                displayName = "📍 $className.$methodName:$lineNumber", // 在显示名称中包含行号
+                displayName = "$className.$methodName:$lineNumber", // 在显示名称中包含行号
                 location = getElementLocation(callSite), // 使用调用点的位置而不是方法定义的位置
                 nodeType = nodeType,
                 psiElement = callSite // 使用调用点的PSI元素用于跳转

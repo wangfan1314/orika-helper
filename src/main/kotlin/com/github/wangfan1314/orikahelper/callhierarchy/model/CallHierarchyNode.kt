@@ -1,4 +1,4 @@
-package org.jetbrains.plugins.template.callhierarchy.model
+package com.github.wangfan1314.orikahelper.callhierarchy.model
 
 import com.intellij.psi.PsiElement
 

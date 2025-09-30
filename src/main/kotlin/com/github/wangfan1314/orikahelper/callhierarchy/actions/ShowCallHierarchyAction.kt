@@ -1,4 +1,4 @@
-package org.jetbrains.plugins.template.callhierarchy.actions
+package com.github.wangfan1314.orikahelper.callhierarchy.actions
 
 import com.intellij.notification.Notification
 import com.intellij.notification.NotificationType
@@ -13,9 +13,9 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.PsiField
-import org.jetbrains.plugins.template.callhierarchy.services.CallHierarchyAnalyzer
-import org.jetbrains.plugins.template.callhierarchy.ui.CallHierarchyTreeWindowFactory
-import org.jetbrains.plugins.template.utils.FieldSelectionUtils
+import com.github.wangfan1314.orikahelper.callhierarchy.services.CallHierarchyAnalyzer
+import com.github.wangfan1314.orikahelper.callhierarchy.ui.CallHierarchyTreeWindowFactory
+import com.github.wangfan1314.orikahelper.utils.FieldSelectionUtils
 
 /**
  * 显示调用链路Action
@@ -51,7 +51,7 @@ class ShowCallHierarchyAction : AnAction() {
                     val analyzer = project.getService(CallHierarchyAnalyzer::class.java)
                     
                     // 在ReadAction中进行PSI访问
-                    val callHierarchy = ApplicationManager.getApplication().runReadAction<org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNode?> {
+                    val callHierarchy = ApplicationManager.getApplication().runReadAction<com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode?> {
                         indicator.text = "正在查找调用关系..."
                         indicator.fraction = 0.6
                         analyzer.analyzeCallHierarchy(selectedField)
@@ -99,7 +99,7 @@ class ShowCallHierarchyAction : AnAction() {
     private fun showResults(
         project: Project, 
         field: PsiField, 
-        callHierarchy: org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNode
+        callHierarchy: com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode
     ) {
         // 获取或创建工具窗口
         val toolWindowManager = ToolWindowManager.getInstance(project)
@@ -134,7 +134,7 @@ class ShowCallHierarchyAction : AnAction() {
     /**
      * 构建分析摘要
      */
-    private fun buildAnalysisSummary(callHierarchy: org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNode): String {
+    private fun buildAnalysisSummary(callHierarchy: com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode): String {
         val totalNodes = countTotalNodes(callHierarchy)
         val maxDepth = calculateMaxDepth(callHierarchy)
         
@@ -149,7 +149,7 @@ class ShowCallHierarchyAction : AnAction() {
     /**
      * 计算总节点数
      */
-    private fun countTotalNodes(node: org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNode): Int {
+    private fun countTotalNodes(node: com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode): Int {
         var count = 1
         for (child in node.children) {
             count += countTotalNodes(child)
@@ -160,7 +160,7 @@ class ShowCallHierarchyAction : AnAction() {
     /**
      * 计算最大深度
      */
-    private fun calculateMaxDepth(node: org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNode): Int {
+    private fun calculateMaxDepth(node: com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode): Int {
         if (node.children.isEmpty()) {
             return 1
         }

@@ -1,4 +1,4 @@
-package org.jetbrains.plugins.template.callhierarchy.ui
+package com.github.wangfan1314.orikahelper.callhierarchy.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
@@ -7,8 +7,8 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.pom.Navigatable
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
-import org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNode
-import org.jetbrains.plugins.template.callhierarchy.model.CallHierarchyNodeType
+import com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode
+import com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNodeType
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.event.MouseAdapter
@@ -233,11 +233,11 @@ class CallHierarchyTreeWindow(private val project: Project) {
                             }
                             CallHierarchyNodeType.GETTER_METHOD -> {
                                 icon = AllIcons.Nodes.Property
-                                text = "📍 ${nodeData.hierarchyNode.getFullDisplayName()}"
+                                text = "${nodeData.hierarchyNode.getFullDisplayName()}"
                             }
                             CallHierarchyNodeType.SETTER_METHOD -> {
                                 icon = AllIcons.Nodes.Property
-                                text = "📍 ${nodeData.hierarchyNode.getFullDisplayName()}"
+                                text = "${nodeData.hierarchyNode.getFullDisplayName()}"
                             }
                             CallHierarchyNodeType.ORIKA_METHOD -> {
                                 icon = AllIcons.Nodes.Related

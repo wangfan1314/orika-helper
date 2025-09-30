@@ -1,4 +1,4 @@
-package org.jetbrains.plugins.template.callhierarchy.ui
+package com.github.wangfan1314.orikahelper.callhierarchy.ui
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
