@@ -199,7 +199,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
     private fun addCallSiteNodes(calls: List<PsiElement>, parentNode: CallHierarchyNode, field: PsiField) {
         val addedNodes = mutableSetOf<String>() // 用于去重的集合，格式为 "方法签名:行号"
         
-        for (call in calls.take(10)) { // 增加处理数量以便去重后仍有足够的结果
+        for (call in calls.take(50)) { // 增加处理数量以支持多模块项目
             val callerMethod = PsiTreeUtil.getParentOfType(call, PsiMethod::class.java)
             if (callerMethod != null) {
                 // 计算调用点的行号
@@ -231,13 +231,14 @@ class CallHierarchyAnalyzer(private val project: Project) {
         try {
             // 使用IDEA内置的搜索API来查找方法调用
             // 首先尝试通过类名查找类
-            val targetClass = JavaPsiFacade.getInstance(project).findClass(className, GlobalSearchScope.projectScope(project))
+            // 使用 allScope 以支持多模块项目的跨模块搜索
+            val targetClass = JavaPsiFacade.getInstance(project).findClass(className, GlobalSearchScope.allScope(project))
             
             if (targetClass != null) {
-                // 查找所有对该类的引用
-                val classReferences = ReferencesSearch.search(targetClass, GlobalSearchScope.projectScope(project))
+                // 查找所有对该类的引用（包括所有模块）
+                val classReferences = ReferencesSearch.search(targetClass, GlobalSearchScope.allScope(project))
                 
-                for (ref in classReferences.take(100)) { // 限制处理数量
+                for (ref in classReferences.take(500)) { // 增加处理数量以支持多模块项目
                     val refElement = ref.element
                     val containingFile = refElement.containingFile
                     
@@ -266,7 +267,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                         }
                     })
                     
-                    if (calls.size >= 20) break // 限制查找数量
+                    if (calls.size >= 100) break // 增加限制以支持多模块项目
                 }
             }
             
@@ -299,11 +300,11 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     }
                     true
                 },
-                GlobalSearchScope.projectScope(project)
+                GlobalSearchScope.allScope(project)
             )
             
             // 在每个文件中查找方法调用
-            for (javaFile in javaFiles.take(30)) { // 限制搜索文件数量
+            for (javaFile in javaFiles.take(100)) { // 增加搜索文件数量以支持多模块
                 javaFile.accept(object : JavaRecursiveElementVisitor() {
                     override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
                         super.visitMethodCallExpression(expression)
@@ -328,7 +329,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     }
                 })
                 
-                if (calls.size >= 15) break // 限制查找数量
+                if (calls.size >= 100) break // 增加限制以支持多模块项目
             }
         } catch (e: Exception) {
             // 静默处理异常
@@ -359,7 +360,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             // 查找所有涉及该字段所在类的Orika映射调用（包含PSI元素）
             val mappingCalls: List<MappingCall> = findOrikaMappingCallsWithPsi(field)
             
-            for (mappingCall in mappingCalls.take(10)) { // 增加数量限制
+            for (mappingCall in mappingCalls.take(30)) { // 增加数量限制以支持多模块
                 // 获取包含映射的方法
                 val containingMethod = PsiTreeUtil.getParentOfType(mappingCall.psiElement, PsiMethod::class.java)
                 if (containingMethod != null) {
@@ -405,7 +406,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     }
                     true
                 },
-                GlobalSearchScope.projectScope(project)
+                GlobalSearchScope.allScope(project)
             )
             
             for (javaFile in javaFiles) {
@@ -458,7 +459,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             // 查找方法中的Orika映射调用
             val orikaReferences = findOrikaReferencesInMethod(method)
             
-            for (reference in orikaReferences.take(3)) {
+            for (reference in orikaReferences.take(10)) {  // 增加数量以支持多模块
                 if (reference is PsiMethodCallExpression) {
                     val args = reference.argumentList.expressions
                     if (args.size >= 2) {
@@ -484,7 +485,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                             // 从映射的目标类型继续追踪
                             val relevantTargetType = if (sourceType == fieldClass) targetType else sourceType
                             if (relevantTargetType != null) {
-                                val targetClass = JavaPsiFacade.getInstance(project).findClass(relevantTargetType, GlobalSearchScope.projectScope(project))
+                                val targetClass = JavaPsiFacade.getInstance(project).findClass(relevantTargetType, GlobalSearchScope.allScope(project))
                                 if (targetClass != null) {
                                     val targetField = targetClass.findFieldByName(fieldName, true)
                                     if (targetField != null) {
@@ -514,7 +515,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             val targetMethods = findMethodsUsingField(targetField)
             val orikaContainingMethod = PsiTreeUtil.getParentOfType(orikaReference, PsiMethod::class.java)
             
-            for (targetMethod in targetMethods.take(3)) {
+            for (targetMethod in targetMethods.take(10)) {  // 增加数量以支持多模块
                 if (targetMethod != orikaContainingMethod) {
                     val targetMethodNode = createMethodNode(targetMethod)
                     if (targetMethodNode != null) {
@@ -537,7 +538,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
      */
     private fun findFieldInClass(className: String, fieldName: String): PsiField? {
         try {
-            val classes = JavaPsiFacade.getInstance(project).findClasses(className, GlobalSearchScope.projectScope(project))
+            val classes = JavaPsiFacade.getInstance(project).findClasses(className, GlobalSearchScope.allScope(project))
             for (clazz in classes) {
                 val field = clazz.findFieldByName(fieldName, true)
                 if (field != null) {
@@ -595,7 +596,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             val callerMethods = mutableSetOf<PsiMethod>()
             
             // 1. 查找直接的方法引用，并记录调用位置
-            val directReferences = ReferencesSearch.search(method, GlobalSearchScope.projectScope(project))
+            val directReferences = ReferencesSearch.search(method, GlobalSearchScope.allScope(project))
             val methodToCallSites = mutableMapOf<PsiMethod, MutableList<PsiElement>>()
             
             for (reference in directReferences) {
@@ -610,7 +611,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             // 2. 如果当前方法实现了接口方法，也要查找接口方法的调用
             val interfaceMethods = findInterfaceMethodsForImplementation(method)
             for (interfaceMethod in interfaceMethods) {
-                val interfaceReferences = ReferencesSearch.search(interfaceMethod, GlobalSearchScope.projectScope(project))
+                val interfaceReferences = ReferencesSearch.search(interfaceMethod, GlobalSearchScope.allScope(project))
                 for (reference in interfaceReferences) {
                     val element = reference.element
                     val callerMethod = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
@@ -630,8 +631,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 }
             }
             
-            // 使用去重逻辑处理调用者（增加处理数量以确保找到所有调用链路）
-            addCallerNodesWithDeduplication(callerMethods.take(15), methodToCallSites, currentNode, originalField, visitedMethods, depth, maxDepth)
+            // 使用去重逻辑处理调用者（增加处理数量以支持多模块项目）
+            addCallerNodesWithDeduplication(callerMethods.take(50), methodToCallSites, currentNode, originalField, visitedMethods, depth, maxDepth)
             
         } catch (e: Exception) {
             // 静默处理异常
@@ -657,7 +658,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             
             if (callSites.isNotEmpty()) {
                 // 如果一个方法有多个调用点，为每个调用点创建一个节点
-                for (callSite in callSites.take(3)) { // 限制每个方法的调用点数量
+                for (callSite in callSites.take(10)) { // 增加每个方法的调用点数量以支持多模块
                     val lineNumber = getLineNumber(callSite)
                     val methodSignature = "${callerMethod.containingClass?.qualifiedName}.${callerMethod.name}"
                     val nodeKey = "$methodSignature:$lineNumber"
@@ -721,7 +722,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             val callerMethods = mutableSetOf<PsiMethod>()
             
             // 1. 查找直接的方法引用，并记录调用位置
-            val directReferences = ReferencesSearch.search(method, GlobalSearchScope.projectScope(project))
+            val directReferences = ReferencesSearch.search(method, GlobalSearchScope.allScope(project))
             val methodToCallSites = mutableMapOf<PsiMethod, MutableList<PsiElement>>()
             
             for (reference in directReferences) {
@@ -736,7 +737,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             // 2. 如果当前方法实现了接口方法，也要查找接口方法的调用
             val interfaceMethods = findInterfaceMethodsForImplementation(method)
             for (interfaceMethod in interfaceMethods) {
-                val interfaceReferences = ReferencesSearch.search(interfaceMethod, GlobalSearchScope.projectScope(project))
+                val interfaceReferences = ReferencesSearch.search(interfaceMethod, GlobalSearchScope.allScope(project))
                 for (reference in interfaceReferences) {
                     val element = reference.element
                     val callerMethod = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
@@ -756,8 +757,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 }
             }
             
-            // 使用去重逻辑处理调用者（增加处理数量以确保找到所有调用链路）
-            addSimpleCallerNodesWithDeduplication(callerMethods.take(15), methodToCallSites, currentNode, visitedMethods, depth, maxDepth)
+            // 使用去重逻辑处理调用者（增加处理数量以支持多模块项目）
+            addSimpleCallerNodesWithDeduplication(callerMethods.take(50), methodToCallSites, currentNode, visitedMethods, depth, maxDepth)
         } catch (e: Exception) {
             // 静默处理异常
         }
@@ -781,7 +782,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             
             if (callSites.isNotEmpty()) {
                 // 如果一个方法有多个调用点，为每个调用点创建一个节点
-                for (callSite in callSites.take(3)) { // 限制每个方法的调用点数量
+                for (callSite in callSites.take(10)) { // 增加每个方法的调用点数量以支持多模块
                     val lineNumber = getLineNumber(callSite)
                     val methodSignature = "${callerMethod.containingClass?.qualifiedName}.${callerMethod.name}"
                     val nodeKey = "$methodSignature:$lineNumber"
@@ -857,7 +858,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             // 快速检查方法中是否包含Orika映射调用
             val orikaReferences = findOrikaReferencesInMethod(method)
             
-            for (reference in orikaReferences.take(3)) { // 限制处理数量，避免性能问题
+            for (reference in orikaReferences.take(10)) {  // 增加数量以支持多模块 // 限制处理数量，避免性能问题
                 val containingClass = PsiTreeUtil.getParentOfType(reference, PsiClass::class.java)
                 val orikaNode = CallHierarchyNode(
                     className = containingClass?.qualifiedName ?: "Unknown",
@@ -939,10 +940,10 @@ class CallHierarchyAnalyzer(private val project: Project) {
             }
             
             // 对每个目标方法，查找它们的调用者
-            for (targetMethod in targetMethods.take(5)) { // 限制方法数量避免性能问题
+            for (targetMethod in targetMethods.take(20)) { // 增加方法数量以支持多模块
                 val callers = findMethodCallers(targetMethod)
                 
-                for (caller in callers.take(3)) { // 限制调用者数量
+                for (caller in callers.take(10)) { // 增加调用者数量以支持多模块
                     // 确保不会回到原始的Orika映射方法
                     val orikaContainingMethod = PsiTreeUtil.getParentOfType(orikaReference, PsiMethod::class.java)
                     if (caller != orikaContainingMethod) {
@@ -973,9 +974,9 @@ class CallHierarchyAnalyzer(private val project: Project) {
     private fun findMethodCallers(method: PsiMethod): List<PsiMethod> {
         val callers = mutableListOf<PsiMethod>()
         try {
-            val references = ReferencesSearch.search(method, GlobalSearchScope.projectScope(project))
+            val references = ReferencesSearch.search(method, GlobalSearchScope.allScope(project))
             
-            for (reference in references.take(10)) { // 限制引用数量
+            for (reference in references.take(50)) { // 增加引用数量以支持多模块项目
                 val element = reference.element
                 val callerMethod = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
                 if (callerMethod != null && callerMethod != method && callerMethod !in callers) {
@@ -998,11 +999,11 @@ class CallHierarchyAnalyzer(private val project: Project) {
     ) {
         try {
             // 查找目标类型被使用的地方（变量声明、方法参数等）
-            val references = ReferencesSearch.search(targetClass, GlobalSearchScope.projectScope(project))
+            val references = ReferencesSearch.search(targetClass, GlobalSearchScope.allScope(project))
             
             val orikaContainingMethod = PsiTreeUtil.getParentOfType(orikaReference, PsiMethod::class.java)
             
-            for (reference in references.take(8)) { // 限制引用数量
+            for (reference in references.take(50)) { // 增加引用数量以支持多模块项目
                 val element = reference.element
                 val containingMethod = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
                 
@@ -1107,22 +1108,16 @@ class CallHierarchyAnalyzer(private val project: Project) {
         val methods = mutableListOf<PsiMethod>()
         
         try {
-            // 限制搜索范围到相关文件，提高性能
-            val containingClass = field.containingClass
-            val searchScope = if (containingClass != null) {
-                GlobalSearchScope.filesScope(project, listOfNotNull(
-                    containingClass.containingFile?.virtualFile
-                ))
-            } else {
-                GlobalSearchScope.projectScope(project)
-            }
+            // 使用 allScope 以支持多模块项目的跨模块搜索
+            // 在多模块项目中，字段可能被其他模块使用
+            val searchScope = GlobalSearchScope.allScope(project)
             
             // 查找字段的引用，限制结果数量
             val references = ReferencesSearch.search(field, searchScope)
             
             var count = 0
             for (reference in references) {
-                if (count >= 10) break // 限制处理数量
+                if (count >= 50) break // 增加处理数量以支持多模块项目
                 
                 val element = reference.element
                 val method = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
@@ -1407,7 +1402,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             val interfaceClass = interfaceMethod.containingClass ?: return implementations
             
             // 搜索接口的所有实现类
-            val implementations_search = ClassInheritorsSearch.search(interfaceClass, GlobalSearchScope.projectScope(project), false)
+            val implementations_search = ClassInheritorsSearch.search(interfaceClass, GlobalSearchScope.allScope(project), false)
             
             for (implementationClass in implementations_search) {
                 if (!implementationClass.isInterface) {
@@ -1421,7 +1416,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             // 静默处理异常
         }
         
-        return implementations.take(3) // 限制数量避免性能问题
+        return implementations.take(10) // 增加数量以支持多模块项目
     }
     
     /**
