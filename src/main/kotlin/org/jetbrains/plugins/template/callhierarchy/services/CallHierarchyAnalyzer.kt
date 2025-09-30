@@ -55,8 +55,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     val methodNode = createMethodNode(method)
                     if (methodNode != null) {
                         rootNode.addChild(methodNode)
-                        // 使用增强的调用链路分析
-                        analyzeMethodCallHierarchyWithOrikaSupport(field, method, methodNode, mutableSetOf(), 0, 10)
+                        // 使用增强的调用链路分析（增加最大深度以追溯到Controller层）
+                        analyzeMethodCallHierarchyWithOrikaSupport(field, method, methodNode, mutableSetOf(), 0, 15)
                     }
                 }
             }
@@ -137,11 +137,12 @@ class CallHierarchyAnalyzer(private val project: Project) {
             
             // 强制创建getter节点（不检查是否已有显式声明）
             // 检查字段类型来决定使用哪种getter
+            // 注意：只有基本类型 boolean 才使用 isXxx()，包装类型 Boolean 使用 getXxx()
             val fieldType = field.type.canonicalText
-            val shouldUseBooleanGetter = fieldType == "boolean" || fieldType == "java.lang.Boolean"
+            val shouldUseBooleanGetter = fieldType == "boolean"  // 只有基本类型才用isXxx
             
             if (shouldUseBooleanGetter) {
-                // 创建boolean getter节点
+                // 创建 boolean 基本类型的 isXxx() getter节点
                 val getterNode = CallHierarchyNode(
                     className = className,
                     methodName = booleanGetterName,
@@ -156,7 +157,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 val getterCalls = findMethodCallsInProject(className, booleanGetterName)
                 addCallSiteNodes(getterCalls, getterNode, field)
             } else {
-                // 创建普通getter节点
+                // 创建普通 getXxx() getter节点（包括 Boolean 包装类型）
                 val getterNode = CallHierarchyNode(
                     className = className,
                     methodName = getterName,
@@ -213,8 +214,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                         parentNode.addChild(callerNode)
                         addedNodes.add(nodeKey)
                         
-                        // 继续追踪调用链路
-                        analyzeMethodCallHierarchyWithOrikaSupport(field, callerMethod, callerNode, mutableSetOf(), 1, 8)
+                        // 继续追踪调用链路（增加最大深度以追溯到Controller层）
+                        analyzeMethodCallHierarchyWithOrikaSupport(field, callerMethod, callerNode, mutableSetOf(), 1, 15)
                     }
                 }
             }
@@ -358,7 +359,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             // 查找所有涉及该字段所在类的Orika映射调用（包含PSI元素）
             val mappingCalls: List<MappingCall> = findOrikaMappingCallsWithPsi(field)
             
-            for (mappingCall in mappingCalls.take(5)) { // 限制数量
+            for (mappingCall in mappingCalls.take(10)) { // 增加数量限制
                 // 获取包含映射的方法
                 val containingMethod = PsiTreeUtil.getParentOfType(mappingCall.psiElement, PsiMethod::class.java)
                 if (containingMethod != null) {
@@ -375,7 +376,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     rootNode.addChild(methodNode)
                     
                     // 从包含映射的方法继续追踪调用链路（查找谁调用了这个方法）
-                    analyzeMethodCallHierarchyWithOrikaSupport(field, containingMethod, methodNode, mutableSetOf(), 1, 8)
+                    // 增加最大深度，确保能追溯到Controller层
+                    analyzeMethodCallHierarchyWithOrikaSupport(field, containingMethod, methodNode, mutableSetOf(), 1, 15)
                 }
             }
         } catch (e: Exception) {
@@ -518,9 +520,9 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     if (targetMethodNode != null) {
                         orikaNode.addChild(targetMethodNode)
                         
-                        // 继续向上追踪
+                        // 继续向上追踪（增加最大深度以追溯到Controller层）
                         if (!isControllerMethod(targetMethod)) {
-                            analyzeMethodCallHierarchyWithOrikaSupport(targetField, targetMethod, targetMethodNode, mutableSetOf(), 1, 6)
+                            analyzeMethodCallHierarchyWithOrikaSupport(targetField, targetMethod, targetMethodNode, mutableSetOf(), 1, 15)
                         }
                     }
                 }
@@ -628,8 +630,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 }
             }
             
-            // 使用去重逻辑处理调用者
-            addCallerNodesWithDeduplication(callerMethods.take(5), methodToCallSites, currentNode, originalField, visitedMethods, depth, maxDepth)
+            // 使用去重逻辑处理调用者（增加处理数量以确保找到所有调用链路）
+            addCallerNodesWithDeduplication(callerMethods.take(15), methodToCallSites, currentNode, originalField, visitedMethods, depth, maxDepth)
             
         } catch (e: Exception) {
             // 静默处理异常
@@ -754,8 +756,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 }
             }
             
-            // 使用去重逻辑处理调用者
-            addSimpleCallerNodesWithDeduplication(callerMethods.take(5), methodToCallSites, currentNode, visitedMethods, depth, maxDepth)
+            // 使用去重逻辑处理调用者（增加处理数量以确保找到所有调用链路）
+            addSimpleCallerNodesWithDeduplication(callerMethods.take(15), methodToCallSites, currentNode, visitedMethods, depth, maxDepth)
         } catch (e: Exception) {
             // 静默处理异常
         }
@@ -948,9 +950,9 @@ class CallHierarchyAnalyzer(private val project: Project) {
                         if (callerNode != null) {
                             orikaNode.addChild(callerNode)
                             
-                            // 继续向上追踪调用链路
+                            // 继续向上追踪调用链路（增加最大深度以追溯到Controller层）
                             if (!isControllerMethod(caller)) {
-                                analyzeMethodCallHierarchyNative(caller, callerNode, mutableSetOf(), 1, 8)
+                                analyzeMethodCallHierarchyNative(caller, callerNode, mutableSetOf(), 1, 15)
                             }
                         }
                     }
@@ -1014,9 +1016,9 @@ class CallHierarchyAnalyzer(private val project: Project) {
                         if (usageNode != null) {
                             orikaNode.addChild(usageNode)
                             
-                            // 继续向上追踪
+                            // 继续向上追踪（增加最大深度以追溯到Controller层）
                             if (!isControllerMethod(containingMethod)) {
-                                analyzeMethodCallHierarchyNative(containingMethod, usageNode, mutableSetOf(), 1, 6)
+                                analyzeMethodCallHierarchyNative(containingMethod, usageNode, mutableSetOf(), 1, 15)
                             }
                         }
                     }
@@ -1453,11 +1455,19 @@ class CallHierarchyAnalyzer(private val project: Project) {
     }
 
     /**
-     * 获取方法签名
+     * 获取方法签名（包含参数类型，用于区分重载方法）
      */
     private fun getMethodSignature(method: PsiMethod): String {
         val className = method.containingClass?.qualifiedName ?: "Unknown"
-        return "$className.${method.name}"
+        val methodName = method.name
+        
+        // 获取参数类型列表，用于区分重载方法
+        val paramTypes = method.parameterList.parameters.joinToString(", ") { param ->
+            param.type.canonicalText
+        }
+        
+        // 返回格式：ClassName.methodName(paramType1, paramType2, ...)
+        return "$className.$methodName($paramTypes)"
     }
     
     /**
