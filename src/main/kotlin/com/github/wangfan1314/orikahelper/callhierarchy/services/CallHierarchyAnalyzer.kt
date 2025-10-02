@@ -115,8 +115,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 analyzeOrikaRelatedCallsForField(originalField, method, currentNode)
             }
             
-            // 优先使用IDEA原生Call Hierarchy API（速度更快）
-            useNativeCallHierarchyWithOrikaSupport(originalField, method, currentNode, visitedMethods, depth, maxDepth)
+            // 使用经过验证的调用链路分析方法（参考feature_all分支的成功实现）
+            fallbackToSimpleReferenceSearchWithOrikaSupport(originalField, method, currentNode, visitedMethods, depth, maxDepth)
             
         } catch (e: Exception) {
             // 静默处理异常
@@ -423,8 +423,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     rootNode.addChild(methodNode)
                     
                     // 从包含映射的方法继续追踪调用链路（查找谁调用了这个方法）
-                    // 使用合理的深度平衡性能和完整性
-                    analyzeMethodCallHierarchyWithOrikaSupport(field, containingMethod, methodNode, mutableSetOf(), 1, 10)
+                    // 增加最大深度，确保能追溯到Controller层（参考feature_all分支的成功实现）
+                    analyzeMethodCallHierarchyWithOrikaSupport(field, containingMethod, methodNode, mutableSetOf(), 1, 15)
                 }
             }
         } catch (e: Exception) {
@@ -532,15 +532,18 @@ class CallHierarchyAnalyzer(private val project: Project) {
                             )
                             currentNode.addChild(orikaNode)
                             
-                            // 从映射的目标类型继续追踪
+                            // 关键修改：从包含orika映射的方法继续向上追溯调用链路
+                            // 使用IDEA原生Call Hierarchy API来追踪包含映射的方法的调用者
+                            continueTrackingFromOrikaMethod(originalField, method, orikaNode)
+                            
+                            // 从映射的目标类型继续追踪（保留原有功能）
                             val relevantTargetType = if (sourceType == fieldClass) targetType else sourceType
-                            if (relevantTargetType != null) {
-                                val targetClass = JavaPsiFacade.getInstance(project).findClass(relevantTargetType, GlobalSearchScope.allScope(project))
-                                if (targetClass != null) {
-                                    val targetField = targetClass.findFieldByName(fieldName, true)
-                                    if (targetField != null) {
-                                        continueCallHierarchyFromOrikaTargetField(targetField, orikaNode, reference)
-                                    }
+                            // relevantTargetType不会为null，因为在isFieldRelated检查中已经确保了这一点
+                            val targetClass = JavaPsiFacade.getInstance(project).findClass(relevantTargetType!!, GlobalSearchScope.allScope(project))
+                            if (targetClass != null) {
+                                val targetField = targetClass.findFieldByName(fieldName, true)
+                                if (targetField != null) {
+                                    continueCallHierarchyFromOrikaTargetField(targetField, orikaNode, reference)
                                 }
                             }
                         }
@@ -549,6 +552,36 @@ class CallHierarchyAnalyzer(private val project: Project) {
             }
         } catch (e: Exception) {
             // 静默处理异常
+        }
+    }
+    
+    /**
+     * 从包含Orika映射的方法继续向上追溯调用链路
+     * 集成IDEA原生Call Hierarchy API来获取完整的调用链路
+     */
+    private fun continueTrackingFromOrikaMethod(
+        originalField: PsiField,
+        orikaContainingMethod: PsiMethod, 
+        orikaNode: CallHierarchyNode
+    ) {
+        try {
+            // 使用IDEA原生Call Hierarchy API追踪包含orika映射的方法的调用者
+            useNativeCallHierarchyWithOrikaSupport(
+                originalField, 
+                orikaContainingMethod, 
+                orikaNode, 
+                mutableSetOf(), 
+                1, // 从深度1开始，因为orika映射已经是一层了
+                15 // 足够的深度来追溯到Controller层
+            )
+        } catch (e: Exception) {
+            // 静默处理异常，但尝试备用方案
+            try {
+                // 备用方案：直接使用原生Call Hierarchy API
+                analyzeMethodCallHierarchyNative(orikaContainingMethod, orikaNode, mutableSetOf(), 1, 15)
+            } catch (ex: Exception) {
+                // 静默处理异常
+            }
         }
     }
     
