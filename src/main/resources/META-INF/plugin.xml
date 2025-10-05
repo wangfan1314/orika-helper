@@ -24,17 +24,17 @@
     </extensions>
 
     <actions>
-        <group id="OrikaGroup" text="Orika映射分析" description="Orika映射相关功能">
-            <action id="OrikaMappingTracer.ShowMappingRelations" 
+        <group id="OrikaGroup" text="Orika Mapping Analysis" description="Orika Mapping-related functions">
+            <action id="OrikaMappingTracer.ShowMappingRelations"
                     class="com.github.wangfan1314.orikahelper.actions.OrikaMappingTracerAction"
-                    text="显示映射关系"
-                    description="显示选中字段的Orika映射关系">
+                    text="Show Mapping Relations"
+                    description="Shows the Orika mapping relationships for the selected field">
                 <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift M"/>
             </action>
-            <action id="OrikaMappingTracer.ShowCallHierarchy" 
+            <action id="OrikaMappingTracer.ShowCallHierarchy"
                     class="com.github.wangfan1314.orikahelper.callhierarchy.actions.ShowCallHierarchyAction"
-                    text="显示调用链路"
-                    description="显示选中字段的完整调用链路（包含Orika映射补充）">
+                    text="Show Call Hierarchy"
+                    description="Shows the complete call hierarchy for the selected field (including Orika mapping supplements)">
                 <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift O"/>
             </action>
         </group>
