@@ -9,6 +9,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.ide.highlighter.JavaFileType
 import com.github.wangfan1314.orikahelper.model.MappingRelation
 import com.github.wangfan1314.orikahelper.model.MappingCall
+import com.github.wangfan1314.orikahelper.utils.OrikaUtils
 
 /**
  * 简化的映射分析器，专门用于调试递归映射问题
@@ -117,7 +118,7 @@ class SimpleMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = extractTypeFromExpression(args[0])
@@ -203,6 +204,7 @@ class SimpleMappingAnalyzer(private val project: Project) {
             1
         }
     }
+
 
     /**
      * Map调用信息数据类

@@ -11,6 +11,7 @@ import com.intellij.psi.search.FileTypeIndex
 import com.intellij.ide.highlighter.JavaFileType
 import com.github.wangfan1314.orikahelper.model.MappingCall
 import com.github.wangfan1314.orikahelper.model.MappingRelation
+import com.github.wangfan1314.orikahelper.utils.OrikaUtils
 
 /**
  * Orika映射分析服务
@@ -224,7 +225,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = getTypeFromExpression(args[0])
@@ -284,7 +285,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = getTypeFromExpression(args[0])
@@ -344,7 +345,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = getTypeFromExpression(args[0])
@@ -435,7 +436,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     
                     // 检查是否是Orika的map方法调用
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             // 尝试解析源类型和目标类型
@@ -505,7 +506,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = getTypeFromExpression(args[0])
@@ -560,7 +561,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = getTypeFromExpression(args[0])
@@ -626,7 +627,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = getTypeFromExpression(args[0])
@@ -693,7 +694,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     val methodName = expression.methodExpression.referenceName
-                    if (methodName == "map") {
+                    if (methodName == "map" && OrikaUtils.isOrikaMapCall(expression)) {
                         val args = expression.argumentList.expressions
                         if (args.size >= 2) {
                             val sourceType = getTypeFromExpression(args[0])
@@ -830,6 +831,7 @@ class OrikaMappingAnalyzer(private val project: Project) {
             null
         }
     }
+
 
     /**
      * 获取方法的行号

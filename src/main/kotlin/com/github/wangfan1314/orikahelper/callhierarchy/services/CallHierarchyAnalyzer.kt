@@ -17,6 +17,7 @@ import com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNode
 import com.github.wangfan1314.orikahelper.callhierarchy.model.CallHierarchyNodeType
 import com.github.wangfan1314.orikahelper.services.OrikaMappingAnalyzer
 import com.github.wangfan1314.orikahelper.model.MappingCall
+import com.github.wangfan1314.orikahelper.utils.OrikaUtils
 
 /**
  * 调用层级分析器
@@ -460,7 +461,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                                 
                                 super.visitMethodCallExpression(expression)
                                 
-                                if (isOrikaMapCall(expression)) {
+                                if (OrikaUtils.isOrikaMapCall(expression)) {
                                     val args = expression.argumentList.expressions
                                     if (args.size >= 2) {
                                         val sourceType = extractTypeFromExpression(args[0])
@@ -1033,7 +1034,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
             method.accept(object : JavaRecursiveElementVisitor() {
                 override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
                     super.visitMethodCallExpression(expression)
-                    if (isOrikaMapCall(expression)) {
+                    if (OrikaUtils.isOrikaMapCall(expression)) {
                         hasOrikaMapping = true
                     }
                 }
@@ -1342,7 +1343,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
                     super.visitMethodCallExpression(expression)
                     
                     // 检查是否是Orika映射调用
-                    if (isOrikaMapCall(expression)) {
+                    if (OrikaUtils.isOrikaMapCall(expression)) {
                         references.add(expression)
                         count++
                     }
@@ -1355,27 +1356,6 @@ class CallHierarchyAnalyzer(private val project: Project) {
         return references
     }
     
-    /**
-     * 检查是否是Orika映射调用
-     */
-    private fun isOrikaMapCall(expression: PsiMethodCallExpression): Boolean {
-        val methodExpression = expression.methodExpression
-        val methodName = methodExpression.referenceName
-        
-        if (methodName != "map") {
-            return false
-        }
-        
-        // 检查调用链是否包含典型的Orika模式
-        val qualifierText = methodExpression.qualifierExpression?.text?.lowercase()
-        
-        return qualifierText != null && (
-            qualifierText.contains("mapper") ||
-            qualifierText.contains("orika") ||
-            qualifierText.contains("getmapperfacade") ||
-            qualifierText.contains("mapperfactory")
-        )
-    }
     
     /**
      * 提取Orika映射的目标类型
