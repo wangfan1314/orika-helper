@@ -14,7 +14,7 @@ object OrikaUtils {
      */
     fun isOrikaMapCall(expression: PsiMethodCallExpression): Boolean {
         val methodName = expression.methodExpression.referenceName
-        if (methodName != "map") {
+        if (methodName != "map" && methodName != "mapAsList" && methodName != "mapAsSet" && methodName != "mapAsArray") {
             return false
         }
         
@@ -23,11 +23,13 @@ object OrikaUtils {
         if (method != null) {
             val containingClass = method.containingClass
             if (containingClass != null) {
-                val className = containingClass.qualifiedName
-                // 检查是否是Orika相关的类
-                if (className?.contains("orika") == true || 
-                    className?.contains("Mapper") == true ||
-                    className?.contains("Mapping") == true) {
+                val className = containingClass.qualifiedName ?: ""
+                // 检查是否是Orika相关的类（不区分大小写）
+                val lowerClassName = className.lowercase()
+                if (lowerClassName.contains("orika") || 
+                    lowerClassName.contains("mapperfacade") ||
+                    className == "ma.glasnost.orika.MapperFacade" ||
+                    className == "ma.glasnost.orika.MapperFactory") {
                     return true
                 }
             }
@@ -37,17 +39,29 @@ object OrikaUtils {
         val methodCall = expression.methodExpression
         if (methodCall is PsiReferenceExpression) {
             val qualifier = methodCall.qualifierExpression
+            
+            // 情况1: xxx.getMapperFacade().map()
             if (qualifier is PsiMethodCallExpression) {
                 val qualifierMethodName = qualifier.methodExpression.referenceName
                 if (qualifierMethodName == "getMapperFacade") {
-                    // 进一步检查getMapperFacade的调用者
-                    val qualifierQualifier = qualifier.methodExpression.qualifierExpression
-                    if (qualifierQualifier is PsiReferenceExpression) {
-                        val qualifierQualifierName = qualifierQualifier.referenceName
-                        if (qualifierQualifierName?.contains("mapperFactory") == true ||
-                            qualifierQualifierName?.contains("MapperFactory") == true) {
-                            return true
-                        }
+                    return true
+                }
+                
+                // 检查是否返回 MapperFacade 类型
+                val resolvedMethod = qualifier.resolveMethod()
+                val returnType = resolvedMethod?.returnType?.canonicalText
+                if (returnType?.contains("MapperFacade") == true || returnType?.contains("orika") == true) {
+                    return true
+                }
+            }
+            
+            // 情况2: mapperFacade.map() - 直接检查变量类型
+            if (qualifier is PsiReferenceExpression) {
+                val resolved = qualifier.resolve()
+                if (resolved is PsiVariable) {
+                    val type = resolved.type.canonicalText
+                    if (type.contains("MapperFacade") || type.contains("orika")) {
+                        return true
                     }
                 }
             }

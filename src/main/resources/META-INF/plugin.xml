@@ -20,7 +20,24 @@
                     id="调用链路" 
                     anchor="bottom" 
                     secondary="true"/>
+        <toolWindow factoryClass="com.github.wangfan1314.orikahelper.toolWindow.OrikaInspectionToolWindowFactory"
+                    id="Orika检查结果"
+                    anchor="bottom"
+                    icon="AllIcons.Toolwindows.ToolWindowInspection"/>
         <postStartupActivity implementation="com.github.wangfan1314.orikahelper.startup.MyProjectActivity" />
+        
+        <!-- 通知组 -->
+        <notificationGroup id="Orika Inspection" displayType="BALLOON"/>
+        
+        <!-- Orika字段类型不匹配检查 -->
+        <localInspection language="JAVA"
+                         displayName="Orika字段类型不匹配检查"
+                         groupName="Orika"
+                         shortName="OrikaFieldTypeMismatch"
+                         enabledByDefault="true"
+                         level="ERROR"
+                         hasStaticDescription="true"
+                         implementationClass="com.github.wangfan1314.orikahelper.inspections.OrikaFieldTypeMismatchInspection"/>
     </extensions>
 
     <actions>
@@ -37,6 +54,13 @@
                     description="Shows the complete call hierarchy for the selected field (including Orika mapping supplements)">
                 <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift O"/>
             </action>
+            <action id="OrikaMappingTracer.ScanOrikaProblems"
+                    class="com.github.wangfan1314.orikahelper.actions.ScanOrikaProblemsAction"
+                    text="扫描Orika类型问题"
+                    description="扫描项目中所有的Orika字段类型不匹配问题">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift K"/>
+            </action>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
         </group>
     </actions>
 </idea-plugin>
