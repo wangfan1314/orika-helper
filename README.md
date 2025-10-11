@@ -12,7 +12,7 @@
 A powerful IntelliJ IDEA plugin designed specifically for analyzing and tracing field mapping relationships and call hierarchies in Orika mapping framework. Helps developers quickly understand complex object mapping logic in projects, improving development efficiency and code maintainability.
 
 **Key Features:**
-- 🔍 **Smart Mapping Analysis** - Automatically identifies and analyzes Orika mapping configurations
+- 🔍 **Smart Mapping Analysis** - Automatically identifies and analyzes Orika mapping configurations 
 - 🌲 **Complete Call Hierarchy** - Visualizes the complete call hierarchy structure of fields
 - 🎯 **Precise Field Tracking** - Supports field-level precise mapping relationship analysis
 - 🚀 **Quick Code Navigation** - Double-click nodes to jump to corresponding code locations
