@@ -47,7 +47,7 @@ A powerful IntelliJ IDEA plugin designed specifically for analyzing and tracing 
 #### Method 1: Install via JetBrains Plugin Marketplace
 1. Open IntelliJ IDEA
 2. Go to `File` → `Settings` → `Plugins`
-3. Search for "Orika Mapping Tracer"
+3. Search for "orika-helper"
 4. Click `Install` to install the plugin
 5. Restart IDE
 

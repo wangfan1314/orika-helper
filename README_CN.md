@@ -47,7 +47,7 @@
 #### 方式一：通过JetBrains插件市场安装
 1. 打开IntelliJ IDEA
 2. 进入 `File` → `Settings` → `Plugins`
-3. 搜索 "Orika Mapping Tracer"
+3. 搜索 "orika-helper"
 4. 点击 `Install` 安装插件
 5. 重启IDE
 
