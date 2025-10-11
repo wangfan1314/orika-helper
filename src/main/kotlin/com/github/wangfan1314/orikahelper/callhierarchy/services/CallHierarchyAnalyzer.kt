@@ -433,7 +433,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
     }
     
     /**
-     * 查找涉及指定字段的Orika映射调用（优化版：只搜索包含类引用的文件）
+     * 查找涉及指定字段的Orika映射调用（优化版：只搜索包含类引用的文件，支持父类映射）
      */
     private fun findOrikaMappingCallsWithPsi(field: PsiField): List<MappingCall> {
         val calls = mutableListOf<MappingCall>()
@@ -441,15 +441,34 @@ class CallHierarchyAnalyzer(private val project: Project) {
         val fieldName = field.name
         
         try {
-            // 优化：只搜索使用了该类的文件，而不是所有Java文件
-            val targetClass = JavaPsiFacade.getInstance(project).findClass(fieldClass, GlobalSearchScope.allScope(project))
+            // 1. 查找包含fieldClass的父类
+            val parentClasses = findClassesContainingFieldType(fieldClass)
             
+            // 2. 优化：只搜索使用了相关类的文件
+            val targetClass = JavaPsiFacade.getInstance(project).findClass(fieldClass, GlobalSearchScope.allScope(project))
+            val classesToSearch = mutableSetOf<PsiClass>()
+            
+            // 添加字段所在的类
             if (targetClass != null) {
-                val classReferences = ReferencesSearch.search(targetClass, GlobalSearchScope.allScope(project))
-                val processedFiles = mutableSetOf<PsiFile>()
+                classesToSearch.add(targetClass)
+            }
+            
+            // 添加所有父类
+            for (parentInfo in parentClasses) {
+                val parentClass = JavaPsiFacade.getInstance(project).findClass(parentInfo.className, GlobalSearchScope.allScope(project))
+                if (parentClass != null) {
+                    classesToSearch.add(parentClass)
+                }
+            }
+            
+            val processedFiles = mutableSetOf<PsiFile>()
+            
+            // 搜索所有相关类的引用
+            for (searchClass in classesToSearch) {
+                val classReferences = ReferencesSearch.search(searchClass, GlobalSearchScope.allScope(project))
                 
                 // 只处理引用了目标类的文件（这些文件更可能包含Orika映射）
-                for (ref in classReferences.take(takeSize)) {  // 增加数量以支持多模块
+                for (ref in classReferences.take(takeSize)) {
                     val file = ref.element.containingFile
                     if (file is PsiJavaFile && file !in processedFiles) {
                         processedFiles.add(file)
@@ -466,18 +485,49 @@ class CallHierarchyAnalyzer(private val project: Project) {
                                         val sourceType = extractTypeFromExpression(args[0])
                                         val targetType = extractTypeFromExpression(args[1])
                                         
-                                        // 检查这个映射调用是否与我们关注的字段相关
-                                        val isFieldRelated = (sourceType == fieldClass && targetType != null && findFieldInClass(targetType, fieldName) != null) ||
+                                        // 检查直接映射：字段所在类的映射
+                                        val isDirectMapping = (sourceType == fieldClass && targetType != null && findFieldInClass(targetType, fieldName) != null) ||
                                                            (targetType == fieldClass && sourceType != null && findFieldInClass(sourceType, fieldName) != null)
                                         
-                                        if (isFieldRelated) {
+                                        // 检查父类映射
+                                        var isParentMapping = false
+                                        if (!isDirectMapping) {
+                                            val sourceParents = parentClasses.filter { it.className == sourceType }
+                                            val targetParents = parentClasses.filter { it.className == targetType }
+                                            
+                                            // 情况1: 源类包含fieldClass，检查目标类的对应字段
+                                            for (sourceParent in sourceParents) {
+                                                if (targetType != null) {
+                                                    val targetFieldInfo = findFieldTypeInClass(targetType, sourceParent.fieldName)
+                                                    if (targetFieldInfo != null && hasMatchingSubField(fieldClass, targetFieldInfo)) {
+                                                        isParentMapping = true
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // 情况2: 目标类包含fieldClass，检查源类的对应字段
+                                            if (!isParentMapping) {
+                                                for (targetParent in targetParents) {
+                                                    if (sourceType != null) {
+                                                        val sourceFieldInfo = findFieldTypeInClass(sourceType, targetParent.fieldName)
+                                                        if (sourceFieldInfo != null && hasMatchingSubField(fieldClass, sourceFieldInfo)) {
+                                                            isParentMapping = true
+                                                            break
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        if (isDirectMapping || isParentMapping) {
                                             val containingMethod = PsiTreeUtil.getParentOfType(expression, PsiMethod::class.java)
                                             if (containingMethod != null) {
                                                 calls.add(MappingCall(
                                                     methodName = containingMethod.name,
                                                     className = containingMethod.containingClass?.qualifiedName ?: "Unknown",
                                                     location = getElementLocation(expression),
-                                                    callType = "ORIKA_MAPPING",
+                                                    callType = if (isParentMapping) "ORIKA_MAPPING_PARENT" else "ORIKA_MAPPING",
                                                     psiElement = expression
                                                 ))
                                             }
@@ -490,6 +540,8 @@ class CallHierarchyAnalyzer(private val project: Project) {
                         if (calls.size >= methodSize) break  // 找到足够多就停止
                     }
                 }
+                
+                if (calls.size >= methodSize) break  // 找到足够多就停止
             }
         } catch (e: Exception) {
             // 静默处理异常
@@ -497,6 +549,129 @@ class CallHierarchyAnalyzer(private val project: Project) {
         
         return calls
     }
+    
+    /**
+     * 查找所有包含指定类型作为字段的类
+     */
+    private fun findClassesContainingFieldType(fieldType: String): List<ParentFieldInfo> {
+        val result = mutableListOf<ParentFieldInfo>()
+        
+        try {
+            // 搜索项目中的所有Java文件
+            val javaFiles = mutableListOf<PsiJavaFile>()
+            FileTypeIndex.processFiles(
+                JavaFileType.INSTANCE,
+                { virtualFile ->
+                    val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
+                    if (psiFile is PsiJavaFile) {
+                        javaFiles.add(psiFile)
+                    }
+                    true
+                },
+                GlobalSearchScope.projectScope(project)
+            )
+            
+            for (javaFile in javaFiles) {
+                javaFile.accept(object : JavaRecursiveElementVisitor() {
+                    override fun visitField(field: PsiField) {
+                        super.visitField(field)
+                        
+                        // 获取字段类型
+                        val fieldTypeName = getSimpleTypeName(field.type)
+                        
+                        // 如果字段类型匹配，记录父类信息
+                        if (fieldTypeName == fieldType) {
+                            val containingClass = field.containingClass?.qualifiedName
+                            if (containingClass != null) {
+                                result.add(ParentFieldInfo(
+                                    className = containingClass,
+                                    fieldName = field.name,
+                                    fieldType = fieldTypeName
+                                ))
+                            }
+                        }
+                    }
+                })
+            }
+        } catch (e: Exception) {
+            // 忽略异常
+        }
+        
+        return result
+    }
+    
+    /**
+     * 获取类型的简单名称（去掉泛型参数）
+     */
+    private fun getSimpleTypeName(type: PsiType): String {
+        var typeName = type.canonicalText
+        if (typeName.contains('<')) {
+            typeName = typeName.substringBefore('<')
+        }
+        return typeName
+    }
+    
+    /**
+     * 在指定类中查找指定字段名的字段类型
+     */
+    private fun findFieldTypeInClass(className: String, fieldName: String): String? {
+        try {
+            val classes = JavaPsiFacade.getInstance(project).findClasses(className, GlobalSearchScope.projectScope(project))
+            for (clazz in classes) {
+                val field = clazz.findFieldByName(fieldName, true)
+                if (field != null) {
+                    return getSimpleTypeName(field.type)
+                }
+            }
+        } catch (e: Exception) {
+            // 忽略异常
+        }
+        return null
+    }
+    
+    /**
+     * 检查两个类型是否具有匹配的子字段
+     */
+    private fun hasMatchingSubField(childClass1: String, childClass2: String): Boolean {
+        try {
+            // 获取两个类的所有字段
+            val class1Fields = getClassFields(childClass1)
+            val class2Fields = getClassFields(childClass2)
+            
+            // 如果两个类至少有一个公共字段名，则认为它们匹配
+            val commonFields = class1Fields.intersect(class2Fields)
+            return commonFields.isNotEmpty()
+        } catch (e: Exception) {
+            return false
+        }
+    }
+    
+    /**
+     * 获取类的所有字段名
+     */
+    private fun getClassFields(className: String): Set<String> {
+        val fieldNames = mutableSetOf<String>()
+        try {
+            val classes = JavaPsiFacade.getInstance(project).findClasses(className, GlobalSearchScope.projectScope(project))
+            for (clazz in classes) {
+                clazz.allFields.forEach { field ->
+                    fieldNames.add(field.name)
+                }
+            }
+        } catch (e: Exception) {
+            // 忽略异常
+        }
+        return fieldNames
+    }
+    
+    /**
+     * 父类字段信息
+     */
+    private data class ParentFieldInfo(
+        val className: String,
+        val fieldName: String,
+        val fieldType: String
+    )
     
     /**
      * 针对特定字段分析Orika相关的调用
@@ -1680,7 +1855,10 @@ class CallHierarchyAnalyzer(private val project: Project) {
                 }
             }
             is PsiClassObjectAccessExpression -> {
-                var type = expression.operand.type.canonicalText
+                // 对于 XXX.class 这种表达式，直接获取类的完全限定名
+                // expression.operand 是 PsiTypeElement，其 type 是我们需要的类型
+                val operandType = expression.operand.type
+                var type = operandType.canonicalText
                 if (type.contains('<')) {
                     type = type.substringBefore('<')
                 }

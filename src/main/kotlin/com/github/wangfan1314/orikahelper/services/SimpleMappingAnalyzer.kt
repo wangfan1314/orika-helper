@@ -17,16 +17,17 @@ import com.github.wangfan1314.orikahelper.model.MappingCall
 class SimpleMappingAnalyzer(private val project: Project) {
 
     /**
-     * 查找所有相关的映射关系（简化版，增加字段级别验证）
+     * 查找所有相关的映射关系（简化版，增加字段级别验证，支持子对象映射追踪）
      */
     fun findAllMappings(selectedField: PsiField): List<MappingRelation> {
         val relations = mutableListOf<MappingRelation>()
         val fieldName = selectedField.name
+        val fieldClass = selectedField.containingClass?.qualifiedName ?: return relations
         
         // 获取项目中所有的map调用
         val allMapCalls = findAllMapCalls()
         
-        // 分析每个map调用，只有当源类和目标类都存在该字段时才建立映射关系
+        // 1. 查找直接映射：当前类的字段在源类和目标类中都存在
         for (mapCall in allMapCalls) {
             val sourceClass = mapCall.sourceType
             val targetClass = mapCall.targetType
@@ -49,20 +50,205 @@ class SimpleMappingAnalyzer(private val project: Project) {
             }
         }
         
+        // 2. 查找子对象映射：找到包含当前字段类的主类之间的映射
+        val parentClassMappings = findParentClassMappings(fieldClass, allMapCalls)
+        relations.addAll(parentClassMappings)
+        
         return relations.distinct()
     }
+    
+    /**
+     * 查找包含指定类作为字段的主类之间的映射关系
+     * 例如：当分析AddressEntity时，找到UserEntity -> UserDTO的映射
+     */
+    private fun findParentClassMappings(childClass: String, allMapCalls: List<MapCallInfo>): List<MappingRelation> {
+        val relations = mutableListOf<MappingRelation>()
+        
+        // 1. 找到所有包含childClass作为字段的类
+        val parentClasses = findClassesContainingFieldType(childClass)
+        
+        // 2. 对于每个映射调用，检查是否涉及包含childClass的父类
+        for (mapCall in allMapCalls) {
+            val sourceClass = mapCall.sourceType
+            val targetClass = mapCall.targetType
+            
+            if (sourceClass != null && targetClass != null) {
+                // 检查源类或目标类是否包含childClass类型的字段
+                val sourceParents = parentClasses.filter { it.className == sourceClass }
+                val targetParents = parentClasses.filter { it.className == targetClass }
+                
+                // 情况1: 源类包含childClass，需要检查目标类的对应字段
+                for (sourceParent in sourceParents) {
+                    val targetFieldInfo = findFieldTypeInClass(targetClass, sourceParent.fieldName)
+                    if (targetFieldInfo != null) {
+                        // 检查目标类的对应字段类型中是否也包含相同的子字段
+                        if (hasMatchingSubField(childClass, targetFieldInfo)) {
+                            relations.add(MappingRelation(
+                                sourceClass = sourceClass,
+                                sourceField = sourceParent.fieldName,
+                                targetClass = targetClass,
+                                targetField = sourceParent.fieldName,
+                                mappingType = "ORIKA_MAP_CALL_PARENT"
+                            ))
+                        }
+                    }
+                }
+                
+                // 情况2: 目标类包含childClass，需要检查源类的对应字段
+                for (targetParent in targetParents) {
+                    val sourceFieldInfo = findFieldTypeInClass(sourceClass, targetParent.fieldName)
+                    if (sourceFieldInfo != null) {
+                        // 检查源类的对应字段类型中是否也包含相同的子字段
+                        if (hasMatchingSubField(childClass, sourceFieldInfo)) {
+                            relations.add(MappingRelation(
+                                sourceClass = sourceClass,
+                                sourceField = targetParent.fieldName,
+                                targetClass = targetClass,
+                                targetField = targetParent.fieldName,
+                                mappingType = "ORIKA_MAP_CALL_PARENT"
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+        
+        return relations.distinct()
+    }
+    
+    /**
+     * 在指定类中查找指定字段名的字段类型
+     */
+    private fun findFieldTypeInClass(className: String, fieldName: String): String? {
+        try {
+            val classes = JavaPsiFacade.getInstance(project).findClasses(className, GlobalSearchScope.projectScope(project))
+            for (clazz in classes) {
+                val field = clazz.findFieldByName(fieldName, true)
+                if (field != null) {
+                    return getSimpleTypeName(field.type)
+                }
+            }
+        } catch (e: Exception) {
+            // 忽略异常
+        }
+        return null
+    }
+    
+    /**
+     * 检查两个类型是否具有匹配的子字段
+     * 即：检查childClass1和childClass2是否具有相同结构的字段
+     */
+    private fun hasMatchingSubField(childClass1: String, childClass2: String): Boolean {
+        try {
+            // 获取两个类的所有字段
+            val class1Fields = getClassFields(childClass1)
+            val class2Fields = getClassFields(childClass2)
+            
+            // 如果两个类至少有一个公共字段名，则认为它们匹配
+            val commonFields = class1Fields.intersect(class2Fields)
+            return commonFields.isNotEmpty()
+        } catch (e: Exception) {
+            return false
+        }
+    }
+    
+    /**
+     * 获取类的所有字段名
+     */
+    private fun getClassFields(className: String): Set<String> {
+        val fieldNames = mutableSetOf<String>()
+        try {
+            val classes = JavaPsiFacade.getInstance(project).findClasses(className, GlobalSearchScope.projectScope(project))
+            for (clazz in classes) {
+                clazz.allFields.forEach { field ->
+                    fieldNames.add(field.name)
+                }
+            }
+        } catch (e: Exception) {
+            // 忽略异常
+        }
+        return fieldNames
+    }
+    
+    /**
+     * 查找所有包含指定类型作为字段的类
+     * 返回：父类名称和字段名称的映射
+     */
+    private fun findClassesContainingFieldType(fieldType: String): List<ParentFieldInfo> {
+        val result = mutableListOf<ParentFieldInfo>()
+        
+        // 搜索项目中的所有Java文件
+        val javaFiles = mutableListOf<PsiJavaFile>()
+        FileTypeIndex.processFiles(
+            JavaFileType.INSTANCE,
+            { virtualFile ->
+                val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
+                if (psiFile is PsiJavaFile) {
+                    javaFiles.add(psiFile)
+                }
+                true
+            },
+            GlobalSearchScope.projectScope(project)
+        )
+        
+        for (javaFile in javaFiles) {
+            javaFile.accept(object : JavaRecursiveElementVisitor() {
+                override fun visitField(field: PsiField) {
+                    super.visitField(field)
+                    
+                    // 获取字段类型
+                    val fieldTypeName = getSimpleTypeName(field.type)
+                    
+                    // 如果字段类型匹配，记录父类信息
+                    if (fieldTypeName == fieldType) {
+                        val containingClass = field.containingClass?.qualifiedName
+                        if (containingClass != null) {
+                            result.add(ParentFieldInfo(
+                                className = containingClass,
+                                fieldName = field.name,
+                                fieldType = fieldTypeName
+                            ))
+                        }
+                    }
+                }
+            })
+        }
+        
+        return result
+    }
+    
+    /**
+     * 获取类型的简单名称（去掉泛型参数）
+     */
+    private fun getSimpleTypeName(type: PsiType): String {
+        var typeName = type.canonicalText
+        if (typeName.contains('<')) {
+            typeName = typeName.substringBefore('<')
+        }
+        return typeName
+    }
+    
+    /**
+     * 父类字段信息
+     */
+    private data class ParentFieldInfo(
+        val className: String,
+        val fieldName: String,
+        val fieldType: String
+    )
 
     /**
-     * 查找所有相关的映射调用（增加字段级别验证）
+     * 查找所有相关的映射调用（增加字段级别验证，支持子对象映射追踪）
      */
     fun findAllMappingCalls(selectedField: PsiField): List<MappingCall> {
         val calls = mutableListOf<MappingCall>()
         val fieldName = selectedField.name
+        val fieldClass = selectedField.containingClass?.qualifiedName ?: return calls
         
         // 获取项目中所有的map调用
         val allMapCalls = findAllMapCalls()
         
-        // 分析每个map调用，只有当源类和目标类都存在该字段时才认为相关
+        // 1. 查找直接映射调用：源类和目标类都存在该字段
         for (mapCall in allMapCalls) {
             val sourceClass = mapCall.sourceType
             val targetClass = mapCall.targetType
@@ -81,6 +267,69 @@ class SimpleMappingAnalyzer(private val project: Project) {
                             className = containingMethod.containingClass?.qualifiedName ?: "Unknown",
                             location = "${containingMethod.containingFile?.name}:${getLineNumber(mapCall.psiCall)}",
                             callType = "ORIKA_MAPPING",
+                            psiElement = mapCall.psiCall
+                        ))
+                    }
+                }
+            }
+        }
+        
+        // 2. 查找子对象映射调用：找到包含当前字段类的主类之间的映射调用
+        val parentClassCalls = findParentClassMappingCalls(fieldClass, allMapCalls)
+        calls.addAll(parentClassCalls)
+        
+        return calls.distinct()
+    }
+    
+    /**
+     * 查找包含指定类作为字段的主类之间的映射调用
+     */
+    private fun findParentClassMappingCalls(childClass: String, allMapCalls: List<MapCallInfo>): List<MappingCall> {
+        val calls = mutableListOf<MappingCall>()
+        
+        // 1. 找到所有包含childClass作为字段的类
+        val parentClasses = findClassesContainingFieldType(childClass)
+        
+        // 2. 对于每个映射调用，检查是否涉及包含childClass的父类
+        for (mapCall in allMapCalls) {
+            val sourceClass = mapCall.sourceType
+            val targetClass = mapCall.targetType
+            
+            if (sourceClass != null && targetClass != null) {
+                // 检查源类或目标类是否包含childClass类型的字段
+                val sourceParents = parentClasses.filter { it.className == sourceClass }
+                val targetParents = parentClasses.filter { it.className == targetClass }
+                
+                var shouldAddCall = false
+                
+                // 情况1: 源类包含childClass，需要检查目标类的对应字段
+                for (sourceParent in sourceParents) {
+                    val targetFieldInfo = findFieldTypeInClass(targetClass, sourceParent.fieldName)
+                    if (targetFieldInfo != null && hasMatchingSubField(childClass, targetFieldInfo)) {
+                        shouldAddCall = true
+                        break
+                    }
+                }
+                
+                // 情况2: 目标类包含childClass，需要检查源类的对应字段
+                if (!shouldAddCall) {
+                    for (targetParent in targetParents) {
+                        val sourceFieldInfo = findFieldTypeInClass(sourceClass, targetParent.fieldName)
+                        if (sourceFieldInfo != null && hasMatchingSubField(childClass, sourceFieldInfo)) {
+                            shouldAddCall = true
+                            break
+                        }
+                    }
+                }
+                
+                if (shouldAddCall) {
+                    val containingMethod = PsiTreeUtil.getParentOfType(mapCall.psiCall, PsiMethod::class.java)
+                    if (containingMethod != null) {
+                        calls.add(MappingCall(
+                            methodName = containingMethod.name,
+                            className = containingMethod.containingClass?.qualifiedName ?: "Unknown",
+                            location = "${containingMethod.containingFile?.name}:${getLineNumber(mapCall.psiCall)}",
+                            callType = "ORIKA_MAPPING_PARENT",
                             psiElement = mapCall.psiCall
                         ))
                     }
@@ -158,7 +407,11 @@ class SimpleMappingAnalyzer(private val project: Project) {
                 }
             }
             is PsiClassObjectAccessExpression -> {
-                var type = expression.operand.type.canonicalText
+                // 对于 XXX.class 这种表达式，直接获取类的完全限定名
+                // expression.operand 是 PsiTypeElement，其 type 是我们需要的类型
+                val operandType = expression.operand.type
+                // 获取类型的规范文本并去除可能的泛型参数
+                var type = operandType.canonicalText
                 if (type.contains('<')) {
                     type = type.substringBefore('<')
                 }
