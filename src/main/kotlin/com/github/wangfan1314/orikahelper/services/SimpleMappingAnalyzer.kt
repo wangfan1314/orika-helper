@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.FileTypeIndex
+import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.ide.highlighter.JavaFileType
 import com.github.wangfan1314.orikahelper.model.MappingRelation
@@ -15,6 +16,10 @@ import com.github.wangfan1314.orikahelper.model.MappingCall
  */
 @Service(Service.Level.PROJECT)
 class SimpleMappingAnalyzer(private val project: Project) {
+    
+    // 父类关系缓存 - 提高性能
+    private val parentClassCache = mutableMapOf<String, List<ParentFieldInfo>>()
+    private val parentClassSearchLimit = 10  // 限制搜索数量，避免性能问题
 
     /**
      * 查找所有相关的映射关系（简化版，增加字段级别验证，支持子对象映射追踪）
@@ -171,49 +176,62 @@ class SimpleMappingAnalyzer(private val project: Project) {
     }
     
     /**
-     * 查找所有包含指定类型作为字段的类
+     * 查找所有包含指定类型作为字段的类（高性能版本）
      * 返回：父类名称和字段名称的映射
+     * 
+     * 性能优化策略：
+     * 1. 使用缓存避免重复搜索
+     * 2. 使用类引用搜索而不是遍历所有文件
+     * 3. 限制搜索数量
      */
     private fun findClassesContainingFieldType(fieldType: String): List<ParentFieldInfo> {
+        // 1. 检查缓存
+        parentClassCache[fieldType]?.let { return it }
+        
         val result = mutableListOf<ParentFieldInfo>()
         
-        // 搜索项目中的所有Java文件
-        val javaFiles = mutableListOf<PsiJavaFile>()
-        FileTypeIndex.processFiles(
-            JavaFileType.INSTANCE,
-            { virtualFile ->
-                val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
-                if (psiFile is PsiJavaFile) {
-                    javaFiles.add(psiFile)
-                }
-                true
-            },
-            GlobalSearchScope.projectScope(project)
-        )
-        
-        for (javaFile in javaFiles) {
-            javaFile.accept(object : JavaRecursiveElementVisitor() {
-                override fun visitField(field: PsiField) {
-                    super.visitField(field)
-                    
-                    // 获取字段类型
+        try {
+            // 2. 找到目标类
+            val targetClass = JavaPsiFacade.getInstance(project).findClass(fieldType, GlobalSearchScope.allScope(project))
+            if (targetClass == null) {
+                parentClassCache[fieldType] = emptyList()
+                return emptyList()
+            }
+            
+            // 3. 找到所有引用该类的位置
+            val classReferences = ReferencesSearch.search(targetClass, GlobalSearchScope.projectScope(project))
+            
+            // 4. 只处理字段声明中的引用，并限制数量
+            var count = 0
+            for (reference in classReferences) {
+                if (count >= parentClassSearchLimit) break
+                
+                val element = reference.element
+                
+                // 检查是否是字段声明中的引用
+                val field = PsiTreeUtil.getParentOfType(element, PsiField::class.java)
+                if (field != null) {
+                    // 验证这个字段确实是目标类型
                     val fieldTypeName = getSimpleTypeName(field.type)
-                    
-                    // 如果字段类型匹配，记录父类信息
                     if (fieldTypeName == fieldType) {
                         val containingClass = field.containingClass?.qualifiedName
-                        if (containingClass != null) {
+                        if (containingClass != null && containingClass != fieldType) {
                             result.add(ParentFieldInfo(
                                 className = containingClass,
                                 fieldName = field.name,
                                 fieldType = fieldTypeName
                             ))
+                            count++
                         }
                     }
                 }
-            })
+            }
+        } catch (e: Exception) {
+            // 忽略异常
         }
         
+        // 5. 缓存结果
+        parentClassCache[fieldType] = result
         return result
     }
     

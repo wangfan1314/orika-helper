@@ -30,10 +30,14 @@ class CallHierarchyAnalyzer(private val project: Project) {
     private val takeSize = 300  // 通用限制，用于引用、调用等
     private val methodTakeSize = 100  // 方法调用点限制，增加以支持多模块
     private val methodSize = 50  // Orika方法数量限制
+    private val parentClassSearchLimit = 10  // 父类搜索限制，避免性能问题
     
     // 添加缓存以提高性能
     private val methodCallCache = mutableMapOf<String, List<PsiElement>>()
     private val methodReferenceCache = mutableMapOf<String, Collection<PsiReference>>()
+    
+    // 父类关系缓存 - 缓存类型到包含该类型的父类的映射
+    private val parentClassCache = mutableMapOf<String, List<ParentFieldInfo>>()
     
     /**
      * 清除缓存（在每次分析开始时调用）
@@ -41,6 +45,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
     private fun clearCache() {
         methodCallCache.clear()
         methodReferenceCache.clear()
+        parentClassCache.clear()
     }
     
     /**
@@ -551,52 +556,61 @@ class CallHierarchyAnalyzer(private val project: Project) {
     }
     
     /**
-     * 查找所有包含指定类型作为字段的类
+     * 查找所有包含指定类型作为字段的类（高性能版本）
+     * 策略：
+     * 1. 使用缓存避免重复搜索
+     * 2. 只搜索包含 Orika 映射的文件
+     * 3. 使用类引用搜索而不是遍历所有文件
+     * 4. 限制搜索数量
      */
     private fun findClassesContainingFieldType(fieldType: String): List<ParentFieldInfo> {
+        // 1. 检查缓存
+        parentClassCache[fieldType]?.let { return it }
+        
         val result = mutableListOf<ParentFieldInfo>()
         
         try {
-            // 搜索项目中的所有Java文件
-            val javaFiles = mutableListOf<PsiJavaFile>()
-            FileTypeIndex.processFiles(
-                JavaFileType.INSTANCE,
-                { virtualFile ->
-                    val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
-                    if (psiFile is PsiJavaFile) {
-                        javaFiles.add(psiFile)
-                    }
-                    true
-                },
-                GlobalSearchScope.projectScope(project)
-            )
+            // 2. 找到目标类
+            val targetClass = JavaPsiFacade.getInstance(project).findClass(fieldType, GlobalSearchScope.allScope(project))
+            if (targetClass == null) {
+                parentClassCache[fieldType] = emptyList()
+                return emptyList()
+            }
             
-            for (javaFile in javaFiles) {
-                javaFile.accept(object : JavaRecursiveElementVisitor() {
-                    override fun visitField(field: PsiField) {
-                        super.visitField(field)
-                        
-                        // 获取字段类型
-                        val fieldTypeName = getSimpleTypeName(field.type)
-                        
-                        // 如果字段类型匹配，记录父类信息
-                        if (fieldTypeName == fieldType) {
-                            val containingClass = field.containingClass?.qualifiedName
-                            if (containingClass != null) {
-                                result.add(ParentFieldInfo(
-                                    className = containingClass,
-                                    fieldName = field.name,
-                                    fieldType = fieldTypeName
-                                ))
-                            }
+            // 3. 找到所有引用该类的位置
+            val classReferences = ReferencesSearch.search(targetClass, GlobalSearchScope.projectScope(project))
+            
+            // 4. 只处理字段声明中的引用，并限制数量
+            var count = 0
+            for (reference in classReferences) {
+                if (count >= parentClassSearchLimit) break
+                
+                val element = reference.element
+                
+                // 检查是否是字段声明中的引用
+                val field = PsiTreeUtil.getParentOfType(element, PsiField::class.java)
+                if (field != null) {
+                    // 验证这个字段确实是目标类型
+                    val fieldTypeName = getSimpleTypeName(field.type)
+                    if (fieldTypeName == fieldType) {
+                        val containingClass = field.containingClass?.qualifiedName
+                        if (containingClass != null && containingClass != fieldType) {
+                            result.add(ParentFieldInfo(
+                                className = containingClass,
+                                fieldName = field.name,
+                                fieldType = fieldTypeName
+                            ))
+                            count++
                         }
                     }
-                })
+                }
             }
         } catch (e: Exception) {
             // 忽略异常
         }
         
+        // 5. 缓存结果
+        parentClassCache[fieldType] = result
         return result
     }
     

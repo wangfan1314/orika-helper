@@ -18,6 +18,13 @@
 - 🚀 **快速代码跳转** - 双击节点即可跳转到对应代码位置
 - 📊 **多种视图模式** - 提供映射关系视图和调用链路视图
 - ⚡ **高性能搜索** - 优化的搜索算法，支持大型项目
+
+**快速使用：**
+- 按 `Ctrl+Alt+Shift+M` 显示选中字段的Orika映射关系
+- 按 `Ctrl+Alt+Shift+O` 显示选中字段的完整调用链路
+- 双击结果窗口中的任意节点可跳转到对应代码位置
+
+**GitHub:** https://github.com/wangfan1314/orika-helper
 <!-- Plugin description end -->
 
 ## ✨ 功能特性

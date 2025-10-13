@@ -18,6 +18,13 @@ A powerful IntelliJ IDEA plugin designed specifically for analyzing and tracing 
 - 🚀 **Quick Code Navigation** - Double-click nodes to jump to corresponding code locations
 - 📊 **Multiple View Modes** - Provides mapping relationship view and call hierarchy view
 - ⚡ **High-Performance Search** - Optimized search algorithms supporting large projects
+
+**Quick Usage:**
+- Press `Ctrl+Alt+Shift+M` to show Orika mapping relationships for the selected field
+- Press `Ctrl+Alt+Shift+O` to show the complete call hierarchy for the selected field
+- Double-click any node in the result window to navigate to the corresponding code location
+
+**GitHub:** https://github.com/wangfan1314/orika-helper
 <!-- Plugin description end -->
 
 ## ✨ Features
